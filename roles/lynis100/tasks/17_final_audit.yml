@@ -41,7 +41,11 @@
 - name: Audit final | Résultat
   ansible.builtin.debug:
     msg:
-      - "Score Lynis : {{ lynis100_score_before | default('?') }} -> {{ lynis100_score_after }}"
+      - "=============================================="
+      - "  LYNIS AVANT : {{ lynis100_score_before | default('?') }} %"
+      - "  LYNIS APRES : {{ lynis100_score_after }} %"
+      - "  GAIN        : +{{ (lynis100_score_after | int) - (lynis100_score_before | default(0) | int) }} points"
+      - "=============================================="
       - "Tests incomplets : {{ lynis100_partial_tests | join(' | ') if lynis100_partial_tests | length > 0 else 'aucun' }}"
       - "Avertissements : {{ lynis100_warnings | join(' | ') if lynis100_warnings | length > 0 else 'aucun' }}"
       - "SSH : ssh -p {{ lynis100_ssh_port }} <{{ lynis100_allow_users_final | join('|') }}>@{{ ansible_host | default(inventory_hostname) }}"

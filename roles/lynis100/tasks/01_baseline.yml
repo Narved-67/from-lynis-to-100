@@ -34,4 +34,4 @@
 
 - name: Audit initial | Affichage
   ansible.builtin.debug:
-    msg: "Score Lynis initial : {{ lynis100_score_before }}"
+    msg: "LYNIS AVANT : {{ lynis100_score_before }} %"
