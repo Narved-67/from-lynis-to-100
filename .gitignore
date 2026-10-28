@@ -6,3 +6,4 @@ group_vars/*/
 .vault_pass*
 .ansible/
 lynis100_answers.yml
+__pycache__/
