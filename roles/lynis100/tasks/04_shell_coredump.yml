@@ -25,18 +25,6 @@
     group: root
     mode: "0644"
 
-- name: Core dumps | Saut de ligne final de limits.conf (sinon la ligne ajoutée se colle au commentaire)
-  ansible.builtin.shell:
-    cmd: |
-      set -eo pipefail
-      f=/etc/security/limits.conf
-      [ -s "$f" ] || exit 0
-      if [ "$(tail -c1 "$f" | od -An -c | tr -d ' ')" != '\n' ]; then echo >> "$f"; echo fixed; fi
-      if grep -qE '^# End of file\*' "$f"; then sed -i 's/^\(# End of file\)\(\*.*\)$/\1\n\2/' "$f"; echo fixed; fi
-    executable: /bin/bash
-  register: lynis100_limits_nl
-  changed_when: "'fixed' in lynis100_limits_nl.stdout"
-
 - name: Core dumps | Limites soft et hard à 0
   ansible.builtin.copy:
     dest: /etc/security/limits.d/99-lynis100-coredump.conf

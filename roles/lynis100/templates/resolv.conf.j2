@@ -1,0 +1,5 @@
+# {{ ansible_managed }}
+# from-lynis-to-100 (NETW-2705)
+{% for ns in lynis100_dns_final %}
+nameserver {{ ns }}
+{% endfor %}

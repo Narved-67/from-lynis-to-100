@@ -151,12 +151,12 @@ lynis100_compiler_removable_prefixes:
 lynis100_nginx_selfsigned_https: true
 
 # --------------------------------------------------------------------- DNS ---
-# NETW-2705 : Lynis veut au moins 2 serveurs DNS qui répondent. Le DNS actuel
-# (DHCP) est gardé, puis complété par ces serveurs publics s'ils répondent.
-# resolv.conf accepte 3 serveurs au maximum.
-lynis100_dns_fallback_servers:
+# NETW-2705 : Lynis veut au moins 2 serveurs DNS qui répondent.
+lynis100_dns_servers:
   - 8.8.8.8
   - 1.1.1.1
+# Garder en premier le DNS fourni par le DHCP (box, passerelle VMware...)
+lynis100_dns_keep_dhcp: true
 
 # ------------------------------------------------------------- Exceptions ---
 lynis100_exceptions: true

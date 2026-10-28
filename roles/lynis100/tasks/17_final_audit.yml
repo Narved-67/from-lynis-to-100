@@ -39,26 +39,18 @@
 - name: Audit final | Rapport et journal
   ansible.builtin.slurp:
     src: "{{ item }}"
-  loop: [/var/log/lynis-report.dat]
+  loop: [/var/log/lynis-report.dat, /var/log/lynis.log]
   register: lynis100_final_files
-
-- name: Audit final | Tests n'ayant pas obtenu tous leurs points
-  ansible.builtin.shell:
-    cmd: >-
-      set -o pipefail;
-      grep -E 'Performing test ID|Hardening: assigned partial' /var/log/lynis.log
-      | grep -B1 'partial' | grep 'Performing test ID'
-      | sed -E 's/.*test ID ([A-Z0-9-]+) \((.*)\)/\1 : \2/' | sort -u || true
-    executable: /bin/bash
-  register: lynis100_partial_raw
-  changed_when: false
 
 - name: Audit final | Analyse
   ansible.builtin.set_fact:
     lynis100_score_after: >-
       {{ (lynis100_final_files.results[0].content | b64decode
           | regex_search('hardening_index=([0-9]+)', '\1') | default(['?'], true)) | first }}
-    lynis100_partial_tests: "{{ lynis100_partial_raw.stdout_lines }}"
+    lynis100_partial_tests: >-
+      {{ lynis100_final_files.results[1].content | b64decode
+         | regex_findall('Performing test ID ([A-Z]+-[0-9]+) \\(([^\\n]*)\\)\\n(?:(?![^\\n]*Performing test ID)[^\\n]*\\n)*?[^\\n]*assigned partial')
+         | map('join', ' : ') | unique | list }}
     lynis100_warnings: >-
       {{ lynis100_final_files.results[0].content | b64decode | regex_findall('(?m)^warning\[\]=([^|]+)\|([^|]+)')
          | map('join', ' : ') | list }}

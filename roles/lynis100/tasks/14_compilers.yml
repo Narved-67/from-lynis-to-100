@@ -50,18 +50,14 @@
       when: lynis100_compilers_unexpected | length > 0
 
 - name: Compilateurs | Binaires restants
-  ansible.builtin.shell:
-    cmd: |
-      set -o pipefail
-      for c in as cc gcc g++ c++ cpp ld clang tcc; do
-        if p=$(command -v "$c" 2>/dev/null); then readlink -f "$p"; fi
-      done | sort -u
-    executable: /bin/bash
+  ansible.builtin.stat:
+    path: "/usr/bin/{{ item }}"
+  loop: [as, cc, gcc, g++, c++, cpp, ld, clang, tcc]
   register: lynis100_compiler_bins
-  changed_when: false
 
 - name: Compilateurs | Réservés à root (HRDN-7222)
   ansible.builtin.file:
     path: "{{ item }}"
     mode: o-rwx
-  loop: "{{ lynis100_compiler_bins.stdout_lines }}"
+  loop: "{{ lynis100_compiler_bins.results | selectattr('stat.exists') | map(attribute='stat.lnk_source') | map('default', omit) | list
+            + lynis100_compiler_bins.results | selectattr('stat.exists') | rejectattr('stat.islnk') | map(attribute='stat.path') | list }}"

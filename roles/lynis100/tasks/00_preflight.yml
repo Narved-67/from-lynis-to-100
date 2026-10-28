@@ -35,24 +35,15 @@
     fail_msg: "systemd est requis (service_mgr={{ ansible_facts.service_mgr }})."
     quiet: true
 
-- name: Préflight | Détection conteneur
-  ansible.builtin.command: systemd-detect-virt --container
-  register: lynis100_ctr
-  changed_when: false
-  failed_when: false
-
-- name: Préflight | Détection machine virtuelle
-  ansible.builtin.command: systemd-detect-virt --vm
-  register: lynis100_vm
-  changed_when: false
-  failed_when: false
-
-- name: Préflight | Faits de virtualisation
+- name: Préflight | Faits de virtualisation (facts Ansible, sans commande)
   ansible.builtin.set_fact:
-    lynis100_in_container: "{{ lynis100_ctr.rc == 0 }}"
+    lynis100_in_container: >-
+      {{ ansible_facts.virtualization_role | default('') == 'guest'
+         and ansible_facts.virtualization_type | default('') | lower
+             in ['docker', 'podman', 'lxc', 'container', 'containerd', 'systemd-nspawn', 'openvz', 'wsl'] }}
     lynis100_virt: >-
-      {{ (lynis100_ctr.stdout | trim) if lynis100_ctr.rc == 0
-         else (lynis100_vm.stdout | default('none', true) | trim) }}
+      {{ ansible_facts.virtualization_type | default('none') | lower
+         if ansible_facts.virtualization_role | default('') == 'guest' else 'none' }}
 
 - name: Préflight | Refus en conteneur (sauf test explicite)
   ansible.builtin.assert:
@@ -79,23 +70,20 @@
     fail_msg: "lynis100_ssh_port invalide : {{ lynis100_ssh_port }}"
     quiet: true
 
-- name: Préflight | Ports TCP en écoute
-  ansible.builtin.command: ss -Htlnp
-  register: lynis100_ss
-  changed_when: false
+- name: Préflight | Ports TCP en écoute (module listen_ports_facts)
+  community.general.listen_ports_facts:
+    include_non_listening: false
 
 - name: Préflight | Ports SSH actuels et ports en écoute
   ansible.builtin.set_fact:
     lynis100_listen_ports: >-
-      {{ lynis100_ss.stdout_lines
-         | map('split') | map(attribute=3)
-         | reject('match', '^(127\.|\[::1\]|::1)')
-         | map('regex_replace', '^.*:', '') | select('match', '^[0-9]+$')
-         | map('int') | unique | sort }}
+      {{ ansible_facts.tcp_listen | rejectattr('address', 'match', '^(127\\.|::1$)')
+         | map(attribute='port') | map('int') | unique | sort }}
     lynis100_current_ssh_ports: >-
-      {{ lynis100_ss.stdout_lines | select('search', '"sshd"')
-         | map('split') | map(attribute=3) | map('regex_replace', '^.*:', '')
-         | select('match', '^[0-9]+$') | map('int') | unique | sort }}
+      {{ ansible_facts.tcp_listen | selectattr('name', 'in', ['sshd', 'systemd'])
+         | map(attribute='port') | map('int') | select('in', ansible_facts.tcp_listen
+           | selectattr('name', 'equalto', 'sshd') | map(attribute='port') | map('int') | list
+           + [ansible_port | default(22) | int]) | unique | sort }}
     lynis100_conn_port: "{{ (ansible_port | default(ansible_ssh_port) | default(22)) | int }}"
     lynis100_is_local: "{{ ansible_connection | default('ssh') == 'local' }}"
 
@@ -172,14 +160,13 @@
   register: lynis100_ufw_bin
 
 - name: Préflight | Routage IP actif ?
-  ansible.builtin.command: sysctl -n net.ipv4.ip_forward
+  ansible.builtin.slurp:
+    src: /proc/sys/net/ipv4/ip_forward
   register: lynis100_ipfwd
-  changed_when: false
-  failed_when: false
 
 - name: Préflight | Faits d'environnement
   ansible.builtin.set_fact:
-    lynis100_forwarding_needed: "{{ lynis100_docker.stat.exists or (lynis100_ipfwd.stdout | default('0') | trim) == '1' }}"
+    lynis100_forwarding_needed: "{{ lynis100_docker.stat.exists or (lynis100_ipfwd.content | b64decode | trim) == '1' }}"
     lynis100_has_snap: "{{ lynis100_snap.stat.exists }}"
     lynis100_use_ufw: "{{ lynis100_ufw_bin.stat.exists }}"
     lynis100_usb_allowed: >-
@@ -248,14 +235,12 @@
     group: root
     mode: "0700"
 
-- name: Préflight | Archive des fichiers qui vont être modifiés
-  ansible.builtin.shell:
-    cmd: |
-      files=()
-      for f in {{ lynis100_backup_paths | join(' ') }}; do [ -e "$f" ] && files+=("$f"); done
-      tar -czf {{ lynis100_backup_dir }}/{{ ansible_facts.date_time.iso8601_basic_short }}.tar.gz "${files[@]}"
-    executable: /bin/bash
-    creates: "{{ lynis100_backup_dir }}/{{ ansible_facts.date_time.iso8601_basic_short }}.tar.gz"
+- name: Préflight | Archive des fichiers qui vont être modifiés (module archive)
+  community.general.archive:
+    path: "{{ lynis100_backup_paths }}"
+    dest: "{{ lynis100_backup_dir }}/{{ ansible_facts.date_time.iso8601_basic_short }}.tar.gz"
+    format: gz
+    mode: "0600"
   vars:
     lynis100_backup_paths:
       - /etc/login.defs
@@ -267,8 +252,8 @@
       - /etc/nftables.conf
       - /etc/usbguard
       - /etc/resolv.conf
+      - /etc/resolv.conf.head
       - /etc/dhcp/dhclient.conf
-      - /etc/dhcpcd.conf
       - /etc/default/sysstat
       - /etc/default/debsums
       - /etc/aide/aide.conf
@@ -279,8 +264,6 @@
       - /etc/nginx
       - /etc/lynis
       - /etc/apt/preferences.d
-  register: lynis100_backup
-  failed_when: lynis100_backup.rc | default(0) not in [0, 1]
 
 - name: Préflight | Récapitulatif
   ansible.builtin.debug:

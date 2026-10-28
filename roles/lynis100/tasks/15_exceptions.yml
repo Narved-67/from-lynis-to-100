@@ -20,12 +20,14 @@
   failed_when: false
 
 - name: Exceptions | / est-il chiffré ? (DEB-0510)
-  ansible.builtin.shell:
-    cmd: set -o pipefail; lsblk -no TYPE -s "$(findmnt -no SOURCE /)" | grep -qx crypt
-    executable: /bin/bash
-  register: lynis100_root_crypt
+  ansible.builtin.command: lsblk -no TYPE -s {{ ansible_facts.mounts | selectattr('mount', 'equalto', '/') | map(attribute='device') | first }}
+  register: lynis100_root_crypt_raw
   changed_when: false
   failed_when: false
+
+- name: Exceptions | Résultat chiffrement
+  ansible.builtin.set_fact:
+    lynis100_root_crypt: {rc: "{{ 0 if 'crypt' in lynis100_root_crypt_raw.stdout_lines else 1 }}"}
 
 - name: Exceptions | /home et /var séparés ? (FILE-6310)
   ansible.builtin.command: findmnt -n {{ item }}
@@ -39,7 +41,7 @@
     lynis100_skip_tests_final: >-
       {{ lynis100_skip_tests
          + ([{'id': 'DEB-0510', 'why': 'Disque systeme non chiffre (chiffrer = reinstaller)'}]
-            if lynis100_root_crypt.rc != 0 else [])
+            if (lynis100_root_crypt.rc | int) != 0 else [])
          + ([{'id': 'DEB-0810', 'why': 'apt-listbugs absent des depots de cette distribution'}]
             if 'install ok installed' not in lynis100_listbugs.stdout else [])
          + ([{'id': 'FILE-6310', 'why': 'home et var sur la partition racine (repartitionner = reinstaller)'}]
@@ -74,12 +76,14 @@
   when: lynis100_exceptions | bool
 
 - name: Exceptions | Paquets supprimés mais non purgés (PKGS-7346)
-  ansible.builtin.shell:
-    cmd: |
-      set -o pipefail
-      p=$(dpkg -l | awk '/^rc/{print $2}')
-      [ -z "$p" ] && exit 0
-      echo "$p" | xargs dpkg --purge && echo purged
-    executable: /bin/bash
-  register: lynis100_rc_purge
-  changed_when: "'purged' in lynis100_rc_purge.stdout"
+  ansible.builtin.command:
+    argv: [dpkg-query, -W, "-f=${db:Status-Abbrev} ${Package}\n"]
+  register: lynis100_dpkg_states
+  changed_when: false
+
+- name: Exceptions | Purge des configurations résiduelles
+  ansible.builtin.apt:
+    name: "{{ lynis100_dpkg_states.stdout_lines | select('match', '^rc') | map('split') | map('last') | list }}"
+    state: absent
+    purge: true
+  when: lynis100_dpkg_states.stdout_lines | select('match', '^rc') | list | length > 0
