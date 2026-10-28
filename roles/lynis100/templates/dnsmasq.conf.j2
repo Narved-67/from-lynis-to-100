@@ -1,0 +1,9 @@
+# {{ ansible_managed }}
+# from-lynis-to-100 (NETW-2705) : résolveur local
+listen-address=127.0.0.1
+bind-interfaces
+no-resolv
+cache-size=1000
+{% for s in lynis100_dns_upstream %}
+server={{ s }}
+{% endfor %}

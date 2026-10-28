@@ -37,3 +37,8 @@
   ansible.builtin.systemd:
     name: postfix
     state: reloaded
+
+- name: Redémarrer dnsmasq
+  ansible.builtin.systemd:
+    name: dnsmasq
+    state: restarted

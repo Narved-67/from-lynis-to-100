@@ -1,11 +1,10 @@
 ---
 # =============================================================================
-# 10 - DNS (NETW-2705) : au moins 2 serveurs DNS. Configuration déclarative,
-# sans test préalable : lynis100_dns_servers (8.8.8.8, 1.1.1.1 par défaut),
-# précédés du DNS fourni par le DHCP si lynis100_dns_keep_dhcp est vrai.
-# Persistant face au DHCP :
-#   dhcpcd   -> /etc/resolv.conf.head (recopié en tête à chaque bail)
-#   dhclient -> "supersede domain-name-servers" dans dhclient.conf
+# 10 - DNS (NETW-2705) : résolveur local dnsmasq sur 127.0.0.1.
+# Lynis ne compte pas NETW-2705 quand un résolveur local est présent, et
+# dnsmasq continue de fonctionner si les DNS publics sont bloqués.
+# resolv.conf = 127.0.0.1 + 1er DNS amont (DHCP ou passerelle) en secours. Persistant face au DHCP :
+#   dhcpcd -> /etc/resolv.conf.head ; dhclient -> supersede domain-name-servers
 # =============================================================================
 - name: DNS | État de resolv.conf
   ansible.builtin.stat:
@@ -16,7 +15,7 @@
   ansible.builtin.debug:
     msg: >-
       /etc/resolv.conf est un lien vers {{ lynis100_resolv_stat.stat.lnk_source | default('?') }} :
-      résolveur local, NETW-2705 non applicable. Rien n'est modifié.
+      résolveur local déjà présent, NETW-2705 non applicable. Rien n'est modifié.
   when: lynis100_resolv_stat.stat.islnk | default(false)
 
 - name: DNS | Configuration
@@ -27,12 +26,42 @@
         src: /etc/resolv.conf
       register: lynis100_resolv_raw
 
-    - name: DNS | Liste des serveurs (3 au maximum)
+    - name: DNS | Serveurs amont (DHCP + passerelle, puis lynis100_dns_servers)
       ansible.builtin.set_fact:
-        lynis100_dns_final: >-
-          {{ (((lynis100_resolv_raw.content | b64decode | regex_findall('(?m)^\s*nameserver\s+(\S+)')
-                | reject('match', '^127\\.') | list) if lynis100_dns_keep_dhcp | bool else [])
-              + lynis100_dns_servers) | unique | list | batch(3) | first }}
+        lynis100_dns_upstream: >-
+          {{ ((lynis100_resolv_raw.content | b64decode | regex_findall('(?m)^\s*nameserver\s+(\S+)')
+               | reject('match', '^(127[.]|::1$)') | reject('in', lynis100_dns_servers) | list)
+              + ([ansible_facts.default_ipv4.gateway | default('')] | select | list)
+              + lynis100_dns_servers) | unique | list }}
+
+    - name: DNS | dnsmasq
+      ansible.builtin.apt:
+        name: dnsmasq
+        state: present
+        install_recommends: false
+        lock_timeout: 300
+
+    - name: DNS | dnsmasq écoute uniquement sur 127.0.0.1
+      ansible.builtin.template:
+        src: dnsmasq.conf.j2
+        dest: /etc/dnsmasq.d/99-lynis-to-100.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Redémarrer dnsmasq
+
+    - name: DNS | Service dnsmasq
+      ansible.builtin.systemd:
+        name: dnsmasq
+        enabled: true
+        state: started
+
+    - name: DNS | Application immédiate
+      ansible.builtin.meta: flush_handlers
+
+    - name: DNS | Serveurs de resolv.conf
+      ansible.builtin.set_fact:
+        lynis100_dns_final: "{{ ['127.0.0.1'] + lynis100_dns_upstream[:1] }}"
 
     - name: DNS | resolv.conf
       ansible.builtin.template:
@@ -63,6 +92,14 @@
         line: "supersede domain-name-servers {{ lynis100_dns_final | join(', ') }};"
       when: lynis100_dhclient_conf.stat.exists
 
-    - name: DNS | Serveurs configurés
+    - name: DNS | Résolution via dnsmasq
+      ansible.builtin.command: getent hosts deb.debian.org
+      register: lynis100_dns_check
+      changed_when: false
+      failed_when: false
+
+    - name: DNS | Résultat
       ansible.builtin.debug:
-        msg: "resolv.conf : {{ lynis100_dns_final | join(', ') }}"
+        msg: >-
+          resolv.conf : {{ lynis100_dns_final | join(', ') }} ; amont dnsmasq : {{ lynis100_dns_upstream | join(', ') }} ;
+          résolution {{ 'OK' if lynis100_dns_check.rc == 0 else 'EN ÉCHEC : vérifiez lynis100_dns_servers' }}

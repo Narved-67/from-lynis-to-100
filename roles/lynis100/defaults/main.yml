@@ -151,12 +151,15 @@ lynis100_compiler_removable_prefixes:
 lynis100_nginx_selfsigned_https: true
 
 # --------------------------------------------------------------------- DNS ---
-# NETW-2705 : Lynis veut au moins 2 serveurs DNS qui répondent.
+# NETW-2705 : Lynis veut 2 serveurs DNS qui répondent, OU un résolveur local
+# (127.0.0.1) dans resolv.conf, auquel cas le test ne s'applique pas.
+# Le rôle installe dnsmasq sur 127.0.0.1 : c'est la seule méthode qui marche
+# même quand le réseau bloque les DNS publics (école, entreprise, NAT VMware).
+# Serveurs amont de dnsmasq : DNS du DHCP, sinon la passerelle par défaut,
+# puis ces serveurs (essayés dans l'ordre par dnsmasq).
 lynis100_dns_servers:
   - 8.8.8.8
   - 1.1.1.1
-# Garder en premier le DNS fourni par le DHCP (box, passerelle VMware...)
-lynis100_dns_keep_dhcp: true
 
 # ------------------------------------------------------------- Exceptions ---
 lynis100_exceptions: true
