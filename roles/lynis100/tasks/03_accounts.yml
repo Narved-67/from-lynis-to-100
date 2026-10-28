@@ -1,0 +1,40 @@
+---
+# =============================================================================
+# 03 - Comptes et mots de passe
+# AUTH-9230 AUTH-9282 AUTH-9286 AUTH-9328 AUTH-9408
+# =============================================================================
+- name: Comptes | login.defs
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: '^#?\s*{{ item.key }}\s+\S+\s*$'
+    line: "{{ item.key }}\t{{ item.value }}"
+    state: present
+  loop:
+    - {key: PASS_MIN_DAYS, value: "{{ lynis100_pass_min_days }}"}
+    - {key: PASS_MAX_DAYS, value: "{{ lynis100_pass_max_days }}"}
+    - {key: PASS_WARN_AGE, value: "{{ lynis100_pass_warn_age }}"}
+    - {key: UMASK, value: "{{ lynis100_umask }}"}
+    - {key: SHA_CRYPT_MIN_ROUNDS, value: "{{ lynis100_sha_crypt_min_rounds }}"}
+    - {key: SHA_CRYPT_MAX_ROUNDS, value: "{{ lynis100_sha_crypt_max_rounds }}"}
+    - {key: FAILLOG_ENAB, value: "yes"}
+  loop_control:
+    label: "{{ item.key }}={{ item.value }}"
+
+- name: Comptes | Comptes avec mot de passe
+  ansible.builtin.getent:
+    database: shadow
+  when: lynis100_apply_aging_to_existing_users | bool
+
+- name: Comptes | Âge des mots de passe des comptes existants
+  ansible.builtin.command: >-
+    chage -m {{ lynis100_pass_min_days }} -M {{ lynis100_pass_max_days }}
+    -W {{ lynis100_pass_warn_age }} {{ item.key }}
+  loop: "{{ ansible_facts.getent_shadow | dict2items | selectattr('value.0', 'match', '^\\$') | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when:
+    - lynis100_apply_aging_to_existing_users | bool
+    - item.value.2 | default('') | string != lynis100_pass_min_days | string
+      or item.value.3 | default('') | string != lynis100_pass_max_days | string
+      or item.value.4 | default('') | string != lynis100_pass_warn_age | string
+  changed_when: true

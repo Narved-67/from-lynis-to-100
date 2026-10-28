@@ -1,0 +1,111 @@
+---
+# =============================================================================
+# 12 - Mises à jour automatiques, bannières, GRUB, droits de fichiers
+# PKGS-7420 BANN-7126 BANN-7130 BOOT-5122 FILE-7524
+# =============================================================================
+- name: Mises à jour | unattended-upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Mises à jour | Service unattended-upgrades
+  ansible.builtin.systemd:
+    name: unattended-upgrades
+    enabled: true
+    state: started
+  failed_when: false
+
+- name: Bannières | /etc/issue et /etc/issue.net
+  ansible.builtin.copy:
+    dest: "{{ item }}"
+    content: |
+      {{ lynis100_banner }}
+    owner: root
+    group: root
+    mode: "0644"
+  loop: [/etc/issue, /etc/issue.net]
+
+- name: GRUB | Protection par mot de passe
+  when:
+    - lynis100_grub_protect | bool
+    - not lynis100_in_container
+  block:
+    - name: GRUB | Fichiers GRUB présents ?
+      ansible.builtin.stat:
+        path: /etc/grub.d/10_linux
+      register: lynis100_grub_linux
+
+    - name: GRUB | Hash du mot de passe (généré sur la cible)
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          printf '%s\n%s\n' "$GRUB_PW" "$GRUB_PW" | grub-mkpasswd-pbkdf2 | awk '/grub.pbkdf2/{print $NF}'
+        executable: /bin/bash
+      environment:
+        GRUB_PW: "{{ lynis100_grub_password }}"
+      register: lynis100_grub_hash_gen
+      changed_when: false
+      no_log: true
+      when:
+        - lynis100_grub_linux.stat.exists
+        - lynis100_grub_password_pbkdf2 | length == 0
+
+    - name: GRUB | Hash retenu
+      ansible.builtin.set_fact:
+        lynis100_grub_hash: "{{ lynis100_grub_password_pbkdf2 if lynis100_grub_password_pbkdf2 | length > 0 else lynis100_grub_hash_gen.stdout | default('') }}"
+      no_log: true
+
+    - name: GRUB | Hash valide
+      ansible.builtin.assert:
+        that: lynis100_grub_hash is match('^grub\.pbkdf2\.sha512\.')
+        fail_msg: "Hash GRUB invalide : vérifiez lynis100_grub_password(_pbkdf2)."
+        quiet: true
+      when: lynis100_grub_linux.stat.exists
+
+    - name: GRUB | Superutilisateur et mot de passe (40_custom)
+      ansible.builtin.blockinfile:
+        path: /etc/grub.d/40_custom
+        marker: "# {mark} from-lynis-to-100 BOOT-5122"
+        block: |
+          set superusers="{{ lynis100_grub_user }}"
+          password_pbkdf2 {{ lynis100_grub_user }} {{ lynis100_grub_hash }}
+      no_log: true
+      when: lynis100_grub_linux.stat.exists
+      notify: Mettre à jour GRUB
+
+    - name: GRUB | Démarrage normal sans mot de passe (--unrestricted)
+      ansible.builtin.replace:
+        path: /etc/grub.d/10_linux
+        regexp: '^CLASS="--class gnu-linux --class gnu --class os"$'
+        replace: 'CLASS="--class gnu-linux --class gnu --class os --unrestricted"'
+      when: lynis100_grub_linux.stat.exists
+      notify: Mettre à jour GRUB
+
+    - name: GRUB | Régénération immédiate de grub.cfg
+      ansible.builtin.meta: flush_handlers
+
+    - name: GRUB | Droits de grub.cfg
+      ansible.builtin.file:
+        path: /boot/grub/grub.cfg
+        mode: "0600"
+      failed_when: false
+
+- name: Droits | crontab et dossiers cron (FILE-7524)
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: /etc/crontab, mode: "0600"}
+    - {path: /etc/cron.d, mode: "0700"}
+    - {path: /etc/cron.daily, mode: "0700"}
+    - {path: /etc/cron.hourly, mode: "0700"}
+    - {path: /etc/cron.weekly, mode: "0700"}
+    - {path: /etc/cron.monthly, mode: "0700"}
+  loop_control:
+    label: "{{ item.path }}"
+  failed_when: false

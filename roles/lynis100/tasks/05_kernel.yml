@@ -1,0 +1,45 @@
+---
+# =============================================================================
+# 05 - Noyau : sysctl (KRNL-6000) et modules (USB-1000 STRG-1846 NETW-3200 FILE-6430)
+# =============================================================================
+- name: Noyau | Clés sysctl présentes sur ce noyau
+  ansible.builtin.stat:
+    path: "/proc/sys/{{ item | replace('.', '/') }}"
+  loop: "{{ lynis100_sysctl.keys() | list }}"
+  register: lynis100_sysctl_present
+
+- name: Noyau | Clés sysctl retenues
+  ansible.builtin.set_fact:
+    lynis100_sysctl_keys: >-
+      {{ lynis100_sysctl_present.results | selectattr('stat.exists') | map(attribute='item')
+         | reject('search', 'forwarding' if lynis100_forwarding_needed else '^__never__$') | list }}
+
+- name: Noyau | Valeurs sysctl (fichier persistant + application immédiate)
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: "{{ lynis100_sysctl[item] | string }}"
+    sysctl_file: /etc/sysctl.d/99-lynis-to-100.conf
+    sysctl_set: true
+    reload: false
+    state: present
+  loop: "{{ lynis100_sysctl_keys }}"
+  register: lynis100_sysctl_apply
+  failed_when: false
+
+- name: Noyau | Clés refusées par le noyau
+  ansible.builtin.debug:
+    msg: "Non appliquées : {{ lynis100_sysctl_apply.results | selectattr('failed', 'defined') | selectattr('failed') | map(attribute='item') | join(', ') }}"
+  when: lynis100_sysctl_apply.results | selectattr('failed', 'defined') | selectattr('failed') | list | length > 0
+
+- name: Noyau | Modules inutiles bloqués
+  ansible.builtin.template:
+    src: modprobe.conf.j2
+    dest: /etc/modprobe.d/99-lynis-to-100.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Noyau | Avertissement snapd
+  ansible.builtin.debug:
+    msg: "snapd présent : squashfs n'est pas bloqué (1 point FILE-6430 perdu)."
+  when: lynis100_has_snap

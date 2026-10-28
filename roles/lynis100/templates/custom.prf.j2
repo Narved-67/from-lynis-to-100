@@ -1,0 +1,7 @@
+# Managed by Ansible (from-lynis-to-100) - ASCII only, one comment per line
+# Exceptions acceptees : justification dans le README
+skip-upgrade-test=yes
+{% for t in lynis100_skip_tests_final %}
+# {{ t.id }} : {{ t.why }}
+skip-test={{ t.id }}
+{% endfor %}

@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: lynis100
+  namespace: narved67
+  author: Narved-67
+  description: Durcissement Debian/Ubuntu visant un Hardening index Lynis de 100
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions: [bookworm, trixie]
+    - name: Ubuntu
+      versions: [jammy, noble]
+  galaxy_tags: [security, hardening, lynis, debian, ubuntu]
+dependencies: []

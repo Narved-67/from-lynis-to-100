@@ -1,0 +1,75 @@
+---
+# =============================================================================
+# 15 - Exceptions documentées (/etc/lynis/custom.prf) et finitions
+# Le profil Lynis n'accepte que l'ASCII et des commentaires sur leur propre
+# ligne : sinon "Fatal error: unexpected characters in profile".
+# =============================================================================
+- name: Exceptions | apt-listbugs EN DERNIER (DEB-0810), il épingle les paquets bogués
+  ansible.builtin.apt:
+    name: apt-listbugs
+    state: present
+    install_recommends: false
+    lock_timeout: 300
+  register: lynis100_listbugs_install
+  failed_when: false
+
+- name: Exceptions | apt-listbugs réellement installé ?
+  ansible.builtin.command: dpkg-query -W -f=${Status} apt-listbugs
+  register: lynis100_listbugs
+  changed_when: false
+  failed_when: false
+
+- name: Exceptions | / est-il chiffré ? (DEB-0510)
+  ansible.builtin.shell:
+    cmd: set -o pipefail; lsblk -no TYPE -s "$(findmnt -no SOURCE /)" | grep -qx crypt
+    executable: /bin/bash
+  register: lynis100_root_crypt
+  changed_when: false
+  failed_when: false
+
+- name: Exceptions | Liste finale
+  ansible.builtin.set_fact:
+    lynis100_skip_tests_final: >-
+      {{ lynis100_skip_tests
+         + ([{'id': 'DEB-0510', 'why': 'Disque systeme non chiffre (chiffrer = reinstaller)'}]
+            if lynis100_root_crypt.rc != 0 else [])
+         + ([{'id': 'DEB-0810', 'why': 'apt-listbugs absent des depots de cette distribution'}]
+            if 'install ok installed' not in lynis100_listbugs.stdout else []) }}
+
+- name: Exceptions | Contrôle ASCII des justifications
+  ansible.builtin.assert:
+    that: (item.id ~ item.why) is match('^[ -~]*$')
+    fail_msg: "Exception {{ item.id }} : caractères non ASCII interdits dans custom.prf."
+    quiet: true
+  loop: "{{ lynis100_skip_tests_final }}"
+  loop_control:
+    label: "{{ item.id }}"
+  when: lynis100_exceptions | bool
+
+- name: Exceptions | Dossier /etc/lynis
+  ansible.builtin.file:
+    path: /etc/lynis
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Exceptions | custom.prf
+  ansible.builtin.template:
+    src: custom.prf.j2
+    dest: /etc/lynis/custom.prf
+    owner: root
+    group: root
+    mode: "0640"
+  when: lynis100_exceptions | bool
+
+- name: Exceptions | Paquets supprimés mais non purgés (PKGS-7346)
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      p=$(dpkg -l | awk '/^rc/{print $2}')
+      [ -z "$p" ] && exit 0
+      echo "$p" | xargs dpkg --purge && echo purged
+    executable: /bin/bash
+  register: lynis100_rc_purge
+  changed_when: "'purged' in lynis100_rc_purge.stdout"

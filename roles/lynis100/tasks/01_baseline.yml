@@ -1,0 +1,37 @@
+---
+# =============================================================================
+# 01 - Lynis + dig, puis audit initial (score de départ)
+# =============================================================================
+- name: Audit initial | Retrait des épinglages apt-listbugs (ils bloquent usbguard)
+  ansible.builtin.file:
+    path: /etc/apt/preferences.d/apt-listbugs
+    state: absent
+  when: lynis100_listbugs_pin.stat.exists
+
+- name: Audit initial | Installation de Lynis et de dig
+  ansible.builtin.apt:
+    name: [lynis, bind9-dnsutils]
+    state: present
+    lock_timeout: 300
+
+- name: Audit initial | Lancement de Lynis (1 à 3 minutes)
+  ansible.builtin.command: lynis audit system --quick --no-colors
+  register: lynis100_audit_before
+  changed_when: false
+  failed_when: false
+
+- name: Audit initial | Lecture du rapport
+  ansible.builtin.slurp:
+    src: /var/log/lynis-report.dat
+  register: lynis100_report_before
+  failed_when: false
+
+- name: Audit initial | Score de départ
+  ansible.builtin.set_fact:
+    lynis100_score_before: >-
+      {{ (lynis100_report_before.content | default('') | b64decode
+          | regex_search('hardening_index=([0-9]+)', '\1') | default(['?'], true)) | first }}
+
+- name: Audit initial | Affichage
+  ansible.builtin.debug:
+    msg: "Score Lynis initial : {{ lynis100_score_before }}"

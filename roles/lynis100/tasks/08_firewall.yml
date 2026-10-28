@@ -1,0 +1,76 @@
+---
+# =============================================================================
+# 08 - Pare-feu (FIRE-4590) : entrant bloqué sauf services en écoute + SSH
+# Pendant l'exécution, l'ancien ET le nouveau port SSH sont ouverts ;
+# l'ancien est refermé en 16_ssh_port_switch.yml une fois la bascule validée.
+# =============================================================================
+- name: Pare-feu | Ignoré (désactivé, conteneur ou Docker)
+  ansible.builtin.debug:
+    msg: >-
+      Pare-feu non modifié :
+      {{ 'désactivé par lynis100_firewall' if not (lynis100_firewall | bool)
+         else ('conteneur' if lynis100_in_container else 'Docker gère ses propres règles') }}
+      (FIRE-4590 : 5 points perdus si aucun pare-feu n'est actif).
+  when: not (lynis100_firewall | bool) or lynis100_in_container or lynis100_docker.stat.exists
+
+- name: Pare-feu | Configuration
+  when:
+    - lynis100_firewall | bool
+    - not lynis100_in_container
+    - not lynis100_docker.stat.exists
+  block:
+    - name: Pare-feu | Ports TCP à ouvrir
+      ansible.builtin.set_fact:
+        lynis100_fw_tcp_ports: >-
+          {{ ((lynis100_listen_ports if lynis100_firewall_keep_listening_ports | bool else [])
+              + lynis100_current_ssh_ports + [lynis100_conn_port | int, lynis100_ssh_port | int]
+              + (lynis100_firewall_extra_tcp_ports | map('int') | list))
+             | unique | sort }}
+
+    - name: Pare-feu | nftables
+      when: not lynis100_use_ufw
+      block:
+        - name: Pare-feu | Règles nftables (validées avant écriture)
+          ansible.builtin.template:
+            src: nftables.conf.j2
+            dest: /etc/nftables.conf
+            owner: root
+            group: root
+            mode: "0700"
+            validate: nft -c -f %s
+          notify: Recharger nftables
+
+        - name: Pare-feu | Service nftables
+          ansible.builtin.systemd:
+            name: nftables
+            enabled: true
+            state: started
+
+        - name: Pare-feu | Chargement immédiat des règles
+          ansible.builtin.meta: flush_handlers
+
+    - name: Pare-feu | ufw
+      when: lynis100_use_ufw
+      block:
+        - name: Pare-feu | ufw autorise les ports TCP
+          community.general.ufw:
+            rule: allow
+            port: "{{ item }}"
+            proto: tcp
+          loop: "{{ lynis100_fw_tcp_ports }}"
+
+        - name: Pare-feu | ufw politique par défaut
+          community.general.ufw:
+            direction: "{{ item.direction }}"
+            default: "{{ item.policy }}"
+          loop:
+            - {direction: incoming, policy: deny}
+            - {direction: outgoing, policy: allow}
+
+        - name: Pare-feu | ufw activé
+          community.general.ufw:
+            state: enabled
+
+    - name: Pare-feu | Ports ouverts
+      ansible.builtin.debug:
+        msg: "TCP autorisés en entrée : {{ lynis100_fw_tcp_ports | join(', ') }}"

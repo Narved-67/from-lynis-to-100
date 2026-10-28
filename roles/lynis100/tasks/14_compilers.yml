@@ -1,0 +1,67 @@
+---
+# =============================================================================
+# 14 - Compilateurs (HRDN-7220 HRDN-7222)
+# La suppression est simulée d'abord : si apt veut retirer un paquet qui n'est
+# pas lié à la compilation, on annule (protection contre la cascade).
+# =============================================================================
+- name: Compilateurs | Paquets installés
+  ansible.builtin.package_facts:
+    manager: apt
+
+- name: Compilateurs | Liste
+  ansible.builtin.set_fact:
+    lynis100_compilers_present: "{{ lynis100_compiler_packages | select('in', ansible_facts.packages) | list }}"
+
+- name: Compilateurs | Suppression
+  when:
+    - lynis100_remove_compilers | bool
+    - lynis100_compilers_present | length > 0
+  block:
+    - name: Compilateurs | Simulation apt
+      ansible.builtin.command: apt-get -s purge {{ lynis100_compilers_present | join(' ') }}  # noqa: command-instead-of-module
+      register: lynis100_compilers_sim
+      changed_when: false
+      environment:
+        LC_ALL: C
+
+    - name: Compilateurs | Paquets qui seraient retirés
+      ansible.builtin.set_fact:
+        lynis100_compilers_would_remove: "{{ lynis100_compilers_sim.stdout | regex_findall('(?m)^(?:Purg|Remv) (\\S+)') }}"
+
+    - name: Compilateurs | Paquets hors périmètre
+      ansible.builtin.set_fact:
+        lynis100_compilers_unexpected: >-
+          {{ lynis100_compilers_would_remove | reject('match', '^(' ~ (lynis100_compiler_removable_prefixes | map('regex_escape') | join('|')) ~ ')') | list }}
+
+    - name: Compilateurs | Purge
+      ansible.builtin.apt:
+        name: "{{ lynis100_compilers_present }}"
+        state: absent
+        purge: true
+        autoremove: true
+        lock_timeout: 300
+      when: lynis100_compilers_unexpected | length == 0
+
+    - name: Compilateurs | Suppression annulée
+      ansible.builtin.debug:
+        msg: >-
+          Suppression annulée : apt retirerait aussi {{ lynis100_compilers_unexpected | join(', ') }}.
+          Les compilateurs sont conservés et réservés à root.
+      when: lynis100_compilers_unexpected | length > 0
+
+- name: Compilateurs | Binaires restants
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      for c in as cc gcc g++ c++ cpp ld clang tcc; do
+        if p=$(command -v "$c" 2>/dev/null); then readlink -f "$p"; fi
+      done | sort -u
+    executable: /bin/bash
+  register: lynis100_compiler_bins
+  changed_when: false
+
+- name: Compilateurs | Réservés à root (HRDN-7222)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    mode: o-rwx
+  loop: "{{ lynis100_compiler_bins.stdout_lines }}"

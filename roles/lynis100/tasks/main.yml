@@ -1,0 +1,73 @@
+---
+# Ordre d'exécution du rôle. Chaque fichier est taggé : --tags ssh, --skip-tags usb...
+- name: Préflight (prérequis, faits, sauvegarde)
+  ansible.builtin.import_tasks: 00_preflight.yml
+  tags: [always]
+
+- name: Audit initial
+  ansible.builtin.import_tasks: 01_baseline.yml
+  tags: [audit]
+
+- name: Paquets de sécurité
+  ansible.builtin.import_tasks: 02_packages.yml
+  tags: [packages]
+
+- name: Comptes et mots de passe
+  ansible.builtin.import_tasks: 03_accounts.yml
+  tags: [accounts]
+
+- name: Shells et core dumps
+  ansible.builtin.import_tasks: 04_shell_coredump.yml
+  tags: [shell]
+
+- name: Noyau (sysctl, modules)
+  ansible.builtin.import_tasks: 05_kernel.yml
+  tags: [kernel]
+
+- name: Options de montage
+  ansible.builtin.import_tasks: 06_mounts.yml
+  tags: [mounts]
+
+- name: SSH (configuration, sans changement de port) et fail2ban
+  ansible.builtin.import_tasks: 07_ssh_fail2ban.yml
+  tags: [ssh]
+
+- name: Pare-feu
+  ansible.builtin.import_tasks: 08_firewall.yml
+  tags: [firewall]
+
+- name: USB
+  ansible.builtin.import_tasks: 09_usb.yml
+  tags: [usb]
+
+- name: DNS
+  ansible.builtin.import_tasks: 10_dns.yml
+  tags: [dns]
+
+- name: Audit système, intégrité, antimalware
+  ansible.builtin.import_tasks: 11_audit_integrity.yml
+  tags: [integrity]
+
+- name: Mises à jour, bannières, GRUB, droits
+  ansible.builtin.import_tasks: 12_updates_banners_grub.yml
+  tags: [grub, banners]
+
+- name: nginx
+  ansible.builtin.import_tasks: 13_nginx.yml
+  tags: [nginx]
+
+- name: Compilateurs
+  ansible.builtin.import_tasks: 14_compilers.yml
+  tags: [compilers]
+
+- name: Exceptions Lynis et finitions
+  ansible.builtin.import_tasks: 15_exceptions.yml
+  tags: [exceptions]
+
+- name: Bascule du port SSH (en dernier, avec retour arrière)
+  ansible.builtin.import_tasks: 16_ssh_port_switch.yml
+  tags: [ssh]
+
+- name: Audit final
+  ansible.builtin.import_tasks: 17_final_audit.yml
+  tags: [audit]

@@ -1,0 +1,85 @@
+---
+# Valeurs internes du rôle (ne pas surcharger)
+lynis100_security_packages: >-
+  {{ ['libpam-tmpdir', 'needrestart', 'fail2ban', 'python3-systemd', 'libpam-passwdqc',
+      'debsums', 'apt-show-versions', 'unattended-upgrades', 'acct', 'sysstat',
+      'auditd', 'aide', 'aide-common', 'clamav', 'clamav-daemon', 'apt-listchanges',
+      'clamav-freshclam', 'usbguard', 'e2fsprogs']
+     + ([] if lynis100_use_ufw else ['nftables'])
+     + ([] if lynis100_remove_compilers | bool else ['rkhunter']) }}
+
+# Profil sysctl de Lynis (default.prf), clés Linux.
+# kernel.modules_disabled est volontairement absent (exception).
+lynis100_sysctl:
+  dev.tty.ldisc_autoload: 0
+  fs.protected_fifos: 2
+  fs.protected_hardlinks: 1
+  fs.protected_regular: 2
+  fs.protected_symlinks: 1
+  fs.suid_dumpable: 0
+  kernel.core_uses_pid: 1
+  kernel.ctrl-alt-del: 0
+  kernel.dmesg_restrict: 1
+  kernel.kptr_restrict: 2
+  kernel.perf_event_paranoid: 3
+  kernel.randomize_va_space: 2
+  kernel.sysrq: 0
+  kernel.unprivileged_bpf_disabled: 1
+  kernel.yama.ptrace_scope: 1
+  net.core.bpf_jit_harden: 2
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.all.accept_source_route: 0
+  net.ipv4.conf.all.bootp_relay: 0
+  net.ipv4.conf.all.forwarding: 0
+  net.ipv4.conf.all.log_martians: 1
+  net.ipv4.conf.all.mc_forwarding: 0
+  net.ipv4.conf.all.proxy_arp: 0
+  net.ipv4.conf.all.rp_filter: 1
+  net.ipv4.conf.all.send_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+  net.ipv4.conf.default.accept_source_route: 0
+  net.ipv4.conf.default.log_martians: 1
+  net.ipv4.conf.default.send_redirects: 0
+  net.ipv4.icmp_echo_ignore_broadcasts: 1
+  net.ipv4.icmp_ignore_bogus_error_responses: 1
+  net.ipv4.tcp_syncookies: 1
+  net.ipv6.conf.all.accept_redirects: 0
+  net.ipv6.conf.all.accept_source_route: 0
+  net.ipv6.conf.all.send_redirects: 0
+  net.ipv6.conf.default.accept_redirects: 0
+  net.ipv6.conf.default.accept_source_route: 0
+
+# Modules noyau bloqués (USB-1000, STRG-1846, NETW-3200, FILE-6430)
+lynis100_blocked_modules: >-
+  {{ ['usb-storage', 'firewire-core', 'firewire-ohci', 'firewire-sbp2',
+      'dccp', 'sctp', 'rds', 'tipc',
+      'cramfs', 'freevxfs', 'hfs', 'hfsplus', 'jffs2', 'udf']
+     + ([] if lynis100_has_snap else ['squashfs']) }}
+
+# Réglages USBGuard contrôlés par Lynis (USB-3000)
+lynis100_usbguard_settings:
+  RuleFile: /etc/usbguard/rules.conf
+  ImplicitPolicyTarget: block
+  PresentDevicePolicy: apply-policy
+  PresentControllerPolicy: apply-policy
+  InsertedDevicePolicy: apply-policy
+  RestoreControllerDeviceState: "false"
+
+# Options de montage exigées par Lynis FILE-6374 (appliquées si le point de
+# montage existe dans fstab ; /dev, /dev/shm et /tmp sont créés s'ils manquent)
+lynis100_mount_policy:
+  /boot: [nodev, noexec, nosuid]
+  /dev: [nosuid, noexec]
+  /dev/shm: [nodev, nosuid, noexec]
+  /home: [nodev, nosuid]
+  /tmp: [nodev, noexec, nosuid]
+  /var: [nodev, nosuid]
+  /var/log: [nodev, noexec, nosuid]
+  /var/log/audit: [nodev, noexec, nosuid]
+  /var/tmp: [nodev, noexec, nosuid]
+
+# Entrées ajoutées à fstab si absentes
+lynis100_mount_defaults:
+  /dev: {src: devtmpfs, fstype: devtmpfs}
+  /dev/shm: {src: tmpfs, fstype: tmpfs}
+  /tmp: {src: tmpfs, fstype: tmpfs, extra: "mode=1777,size={{ lynis100_tmp_tmpfs_size }}"}

@@ -1,0 +1,53 @@
+---
+# =============================================================================
+# 02 - Paquets de sécurité
+# DEB-0280 DEB-0831 DEB-0880 AUTH-9262 PKGS-7370 PKGS-7394 PKGS-7420
+# ACCT-9622 ACCT-9626 ACCT-9628 FINT-4350 HRDN-7230 USB-3000
+# apt-listbugs est installé à la toute fin (15_exceptions.yml) : il épingle
+# les paquets bogués et bloquerait ces installations.
+# =============================================================================
+- name: Paquets | Vérification de disponibilité dans les dépôts
+  ansible.builtin.command: apt-cache policy {{ item }}
+  loop: "{{ lynis100_security_packages }}"
+  register: lynis100_pkg_policy
+  changed_when: false
+  environment:
+    LC_ALL: C
+
+- name: Paquets | Paquets disponibles
+  ansible.builtin.set_fact:
+    lynis100_pkgs_ok: >-
+      {{ lynis100_pkg_policy.results | rejectattr('stdout', 'search', 'Candidate: \(none\)')
+         | rejectattr('stdout', 'equalto', '') | map(attribute='item') | list }}
+    lynis100_pkgs_missing: >-
+      {{ lynis100_security_packages | difference(lynis100_pkg_policy.results
+         | rejectattr('stdout', 'search', 'Candidate: \(none\)')
+         | rejectattr('stdout', 'equalto', '') | map(attribute='item') | list) }}
+
+- name: Paquets | Avertissement paquets introuvables
+  ansible.builtin.debug:
+    msg: "Paquets introuvables (tests Lynis correspondants perdus) : {{ lynis100_pkgs_missing | join(', ') }}"
+  when: lynis100_pkgs_missing | length > 0
+
+- name: Paquets | Installation
+  ansible.builtin.apt:
+    name: "{{ lynis100_pkgs_ok }}"
+    state: present
+    install_recommends: false
+    lock_timeout: 300
+  register: lynis100_pkg_install
+  retries: 2
+  delay: 15
+  until: lynis100_pkg_install is succeeded
+
+- name: Paquets | Mise à jour de sécurité du système (PKGS-7392)
+  ansible.builtin.apt:
+    upgrade: safe
+    lock_timeout: 300
+  when: lynis100_upgrade_packages | bool
+  register: lynis100_upgrade
+
+- name: Paquets | Redémarrage nécessaire ?
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: lynis100_reboot_required

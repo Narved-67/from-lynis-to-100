@@ -1,0 +1,110 @@
+---
+# =============================================================================
+# 10 - DNS (NETW-2705) : Lynis veut 2 serveurs DNS qui répondent. Il ignore le
+# test si un résolveur local (127.0.0.1 / 127.0.0.53) est dans resolv.conf.
+# =============================================================================
+- name: DNS | État de resolv.conf
+  ansible.builtin.stat:
+    path: /etc/resolv.conf
+  register: lynis100_resolv_stat
+
+- name: DNS | Contenu de resolv.conf
+  ansible.builtin.slurp:
+    src: /etc/resolv.conf
+  register: lynis100_resolv_raw
+
+- name: DNS | Analyse
+  ansible.builtin.set_fact:
+    lynis100_nameservers: >-
+      {{ lynis100_resolv_raw.content | b64decode | regex_findall('(?m)^\s*nameserver\s+(\S+)') }}
+
+- name: DNS | Faits
+  ansible.builtin.set_fact:
+    lynis100_dns_has_local: "{{ lynis100_nameservers | select('match', '^(127\\.0\\.0\\.(1|53)|::1|127\\.0\\.1\\.1)$') | list | length > 0 }}"
+    lynis100_dns_upstream: "{{ lynis100_nameservers | reject('match', '^(127\\.|::1)') | list }}"
+
+- name: DNS | Rien à faire
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'Résolveur local déjà présent : NETW-2705 non applicable.' if lynis100_dns_has_local
+         else ('Au moins 2 DNS configurés.' if lynis100_dns_upstream | length >= 2
+         else 'resolv.conf est un lien (systemd-resolved/NetworkManager) : ajoutez un 2e DNS dans ce service.') }}
+  when: >-
+    not (lynis100_dns_local_resolver | bool) or lynis100_dns_has_local
+    or lynis100_dns_upstream | length >= 2 or lynis100_resolv_stat.stat.islnk
+
+- name: DNS | Résolveur local dnsmasq
+  when:
+    - lynis100_dns_local_resolver | bool
+    - not lynis100_dns_has_local
+    - lynis100_dns_upstream | length == 1
+    - not lynis100_resolv_stat.stat.islnk
+  block:
+    - name: DNS | Installation de dnsmasq
+      ansible.builtin.apt:
+        name: dnsmasq
+        state: present
+        lock_timeout: 300
+
+    - name: DNS | Configuration dnsmasq (écoute locale uniquement)
+      ansible.builtin.copy:
+        dest: /etc/dnsmasq.d/99-lynis-to-100.conf
+        content: |
+          # from-lynis-to-100 (NETW-2705)
+          listen-address=127.0.0.1
+          bind-interfaces
+          no-resolv
+          server={{ lynis100_dns_upstream[0] }}
+          cache-size=1000
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Redémarrer dnsmasq
+
+    - name: DNS | Service dnsmasq
+      ansible.builtin.systemd:
+        name: dnsmasq
+        enabled: true
+        state: started
+
+    - name: DNS | Application immédiate
+      ansible.builtin.meta: flush_handlers
+
+    - name: DNS | dnsmasq répond-il ?
+      ansible.builtin.command: dig +short +time=2 +tries=2 @127.0.0.1 deb.debian.org
+      register: lynis100_dig_local
+      changed_when: false
+      failed_when: false
+
+    - name: DNS | resolv.conf (127.0.0.1 + DNS d'origine)
+      ansible.builtin.copy:
+        dest: /etc/resolv.conf
+        content: |
+          # from-lynis-to-100 : dnsmasq local + DNS d'origine
+          nameserver 127.0.0.1
+          nameserver {{ lynis100_dns_upstream[0] }}
+        owner: root
+        group: root
+        mode: "0644"
+      when: lynis100_dig_local.stdout | length > 0
+
+    - name: DNS | Persistance face au DHCP (dhclient)
+      ansible.builtin.lineinfile:
+        path: /etc/dhcp/dhclient.conf
+        line: prepend domain-name-servers 127.0.0.1;
+        create: false
+      failed_when: false
+      when: lynis100_dig_local.stdout | length > 0
+
+    - name: DNS | Persistance face au DHCP (dhcpcd)
+      ansible.builtin.lineinfile:
+        path: /etc/dhcpcd.conf
+        line: nohook resolv.conf
+        create: false
+      failed_when: false
+      when: lynis100_dig_local.stdout | length > 0
+
+    - name: DNS | dnsmasq ne répond pas
+      ansible.builtin.debug:
+        msg: "dnsmasq ne répond pas : resolv.conf laissé intact (NETW-2705 : 1 point perdu)."
+      when: lynis100_dig_local.stdout | length == 0

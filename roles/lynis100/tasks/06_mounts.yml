@@ -1,0 +1,168 @@
+---
+# =============================================================================
+# 06 - Options de montage
+# FILE-6344 (/proc hidepid) FILE-6374 (nodev/noexec/nosuid) FILE-6310 (/home)
+# Ignoré en conteneur.
+# =============================================================================
+- name: Montages | Bloc principal
+  when: not lynis100_in_container
+  block:
+    - name: Montages | /proc avec hidepid=2 (FILE-6344)
+      ansible.posix.mount:
+        path: /proc
+        src: proc
+        fstype: proc
+        opts: defaults,nosuid,nodev,noexec,hidepid=2
+        state: present
+
+    # ------------------------------------------------ /home séparé (option) --
+    - name: Montages | /home est-il déjà séparé ?
+      ansible.builtin.set_fact:
+        lynis100_home_mount: "{{ ansible_facts.mounts | selectattr('mount', 'equalto', '/home') | list | first | default({}) }}"
+        lynis100_root_mount: "{{ ansible_facts.mounts | selectattr('mount', 'equalto', '/') | list | first }}"
+
+    - name: Montages | Création d'un LV /home
+      when:
+        - lynis100_home_lv_size | length > 0
+        - lynis100_home_mount | length == 0
+        - lynis100_root_mount.device is match('^/dev/mapper/')
+      block:
+        - name: Montages | lvm2 et rsync présents
+          ansible.builtin.apt:
+            name: [lvm2, rsync]
+            state: present
+            lock_timeout: 300
+
+        - name: Montages | Groupe de volumes de /
+          ansible.builtin.command: lvs --noheadings -o vg_name {{ lynis100_root_mount.device }}
+          register: lynis100_root_vg
+          changed_when: false
+
+        - name: Montages | LV home
+          community.general.lvol:
+            vg: "{{ lynis100_root_vg.stdout | trim }}"
+            lv: home
+            size: "{{ lynis100_home_lv_size }}"
+
+        - name: Montages | Système de fichiers ext4
+          community.general.filesystem:
+            fstype: ext4
+            dev: "/dev/{{ lynis100_root_vg.stdout | trim }}/home"
+
+        - name: Montages | Copie du contenu actuel de /home
+          ansible.builtin.shell:
+            cmd: |
+              set -e
+              t=$(mktemp -d)
+              mount /dev/{{ lynis100_root_vg.stdout | trim }}/home "$t"
+              rsync -aHAX /home/ "$t"/
+              umount "$t" && rmdir "$t"
+            executable: /bin/bash
+          changed_when: true
+
+        - name: Montages | Montage de /home
+          ansible.posix.mount:
+            path: /home
+            src: "/dev/{{ lynis100_root_vg.stdout | trim }}/home"
+            fstype: ext4
+            opts: "defaults,nodev,nosuid"
+            state: mounted
+
+      rescue:
+        - name: Montages | Échec de la création de /home
+          ansible.builtin.debug:
+            msg: "Création du LV /home impossible (espace libre insuffisant dans le VG ?) : étape ignorée."
+
+    - name: Montages | Entrées fstab actuelles des points de montage contrôlés
+      ansible.builtin.command: findmnt --fstab -n -o SOURCE,FSTYPE,OPTIONS {{ item }}
+      loop: "{{ lynis100_mount_policy.keys() | list }}"
+      register: lynis100_fstab_entries
+      changed_when: false
+      failed_when: false
+
+    - name: Montages | Options exigées par Lynis sur les points de montage existants (FILE-6374)
+      ansible.posix.mount:
+        path: "{{ item.item }}"
+        src: "{{ item.stdout.split()[0] }}"
+        fstype: "{{ item.stdout.split()[1] }}"
+        opts: "{{ (item.stdout.split()[2].split(',') + lynis100_mount_policy[item.item]) | unique | join(',') }}"
+        state: present
+      loop: "{{ lynis100_fstab_entries.results | selectattr('rc', 'equalto', 0) | list }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stdout.split() | length == 3
+
+    - name: Montages | Entrées ajoutées si absentes (/dev, /dev/shm, /tmp en tmpfs)
+      ansible.posix.mount:
+        path: "{{ item.item }}"
+        src: "{{ lynis100_mount_defaults[item.item].src }}"
+        fstype: "{{ lynis100_mount_defaults[item.item].fstype }}"
+        opts: >-
+          {{ (['defaults'] + lynis100_mount_policy[item.item]
+              + ([lynis100_mount_defaults[item.item].extra] if lynis100_mount_defaults[item.item].extra is defined else []))
+             | join(',') }}
+        state: present
+      loop: "{{ lynis100_fstab_entries.results | rejectattr('rc', 'equalto', 0) | selectattr('item', 'in', lynis100_mount_defaults) | list }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # ------------------------------------------- application sans redémarrer --
+    - name: Montages | systemd relit fstab
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Montages | Points de montage actifs
+      ansible.builtin.command: findmnt -n {{ item }}
+      loop: "{{ ['/proc'] + (lynis100_mount_policy.keys() | list) }}"
+      register: lynis100_active_mounts
+      changed_when: false
+      failed_when: false
+
+    - name: Montages | Remontage à chaud avec les options de fstab
+      ansible.posix.mount:
+        path: "{{ item.item }}"
+        state: remounted
+      loop: "{{ lynis100_active_mounts.results | selectattr('rc', 'equalto', 0) | list }}"
+      loop_control:
+        label: "{{ item.item }}"
+      failed_when: false
+
+    - name: Montages | Non montés maintenant, actifs au prochain redémarrage
+      ansible.builtin.debug:
+        msg: "Appliqué au redémarrage : {{ lynis100_active_mounts.results | rejectattr('rc', 'equalto', 0) | map(attribute='item') | join(', ') }}"
+      when: lynis100_active_mounts.results | rejectattr('rc', 'equalto', 0) | list | length > 0
+
+    - name: Montages | apt repasse /tmp en exec pendant les installations
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/99-lynis100-tmp-exec
+        content: |
+          // from-lynis-to-100 : /tmp est noexec, apt le repasse en exec le temps d'une installation
+          DPkg::Pre-Invoke  {"mount -o remount,exec /tmp 2>/dev/null || true";};
+          DPkg::Post-Invoke {"mount -o remount,noexec /tmp 2>/dev/null || true";};
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Montages | Vérification de fstab
+      ansible.builtin.command: findmnt --verify
+      register: lynis100_findmnt
+      changed_when: false
+      failed_when: (lynis100_findmnt.stdout ~ lynis100_findmnt.stderr) is search('(^|[^0-9])[1-9][0-9]* (parse )?errors?')
+      environment:
+        LC_ALL: C
+
+  rescue:
+    - name: "Montages | Erreur : restauration de fstab depuis la sauvegarde"
+      ansible.builtin.unarchive:
+        src: "{{ lynis100_backup_dir }}/{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+        dest: /
+        remote_src: true
+        include: [etc/fstab]
+
+    - name: Montages | systemd relit le fstab restauré
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Montages | Arrêt
+      ansible.builtin.fail:
+        msg: "Erreur pendant la configuration des montages : /etc/fstab a été restauré. Voir la tâche en échec ci-dessus."

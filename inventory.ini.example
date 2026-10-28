@@ -1,0 +1,11 @@
+# Copiez ce fichier en inventory.ini et adaptez-le.
+[lynis_targets]
+deb13-lynis ansible_host=192.168.42.140 ansible_user=yd
+
+# APRÈS la première exécution, SSH écoute sur lynis100_ssh_port :
+# deb13-lynis ansible_host=192.168.42.140 ansible_user=yd ansible_port=2222
+
+[lynis_targets:vars]
+# Debian installé avec un mot de passe root : pas de sudo -> on passe par su
+ansible_become_method=su
+# Avec sudo (Ubuntu, ou Debian sans mot de passe root) : ansible_become_method=sudo

@@ -1,0 +1,28 @@
+---
+# from-lynis-to-100 : durcissement Debian/Ubuntu pour un score Lynis de 100
+#   ansible-galaxy collection install -r requirements.yml
+#   ansible-playbook -i inventory.ini site.yml -e lynis100_i_have_a_snapshot=true --ask-vault-pass
+- name: Durcissement Lynis 100
+  hosts: lynis_targets
+  become: true
+  gather_facts: false
+  force_handlers: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+    APT_LISTBUGS_FRONTEND: none
+    APT_LISTCHANGES_FRONTEND: none
+    NEEDRESTART_MODE: a
+
+  pre_tasks:
+    - name: Python 3 présent sur la cible (requis par Ansible)
+      ansible.builtin.raw: >-
+        test -x /usr/bin/python3 ||
+        (apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q python3 python3-apt)
+      register: lynis100_py
+      changed_when: "'Setting up' in lynis100_py.stdout"
+
+    - name: Collecte des faits
+      ansible.builtin.setup:
+
+  roles:
+    - role: lynis100

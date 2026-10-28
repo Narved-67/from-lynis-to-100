@@ -1,0 +1,15 @@
+---
+# Copiez en group_vars/lynis_targets.yml et adaptez. Les secrets vont dans
+# un fichier chiffré : ansible-vault create group_vars/lynis_targets/vault.yml
+lynis100_ssh_port: 2222
+lynis100_ssh_allow_users: [yd]
+lynis100_fail2ban_ignoreip: [127.0.0.1/8, "::1", 192.168.42.1]
+
+# GRUB : hash recommandé (grub-mkpasswd-pbkdf2) ou mot de passe via vault
+lynis100_grub_password_pbkdf2: ""
+# lynis100_grub_password: "{{ vault_lynis100_grub_password }}"
+
+lynis100_remove_compilers: true
+lynis100_disable_usb: true
+lynis100_home_lv_size: ""     # ex : "2g" si / est sur LVM
+lynis100_reboot: false

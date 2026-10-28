@@ -1,0 +1,6 @@
+# {{ ansible_managed }}
+# from-lynis-to-100 : modules inutiles sur un serveur
+{% for m in lynis100_blocked_modules %}
+install {{ m }} /bin/false
+blacklist {{ m }}
+{% endfor %}

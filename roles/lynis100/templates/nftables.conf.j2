@@ -1,0 +1,22 @@
+#!/usr/sbin/nft -f
+# {{ ansible_managed }}
+# from-lynis-to-100 (FIRE-4590) : entrant bloqué sauf services autorisés
+flush ruleset
+
+table inet filter {
+  chain input {
+    type filter hook input priority 0; policy drop;
+    ct state established,related accept
+    ct state invalid drop
+    iif "lo" accept
+    meta l4proto { icmp, ipv6-icmp } accept
+    udp dport { 68, 546 } accept comment "client DHCP"
+    tcp dport { {{ lynis100_fw_tcp_ports | join(', ') }} } accept
+  }
+  chain forward {
+    type filter hook forward priority 0; policy {{ 'accept' if lynis100_forwarding_needed else 'drop' }};
+  }
+  chain output {
+    type filter hook output priority 0; policy accept;
+  }
+}

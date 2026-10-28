@@ -1,0 +1,202 @@
+---
+# =============================================================================
+# 16 - Bascule du port SSH, en dernier et sans risque de perdre l'accès :
+#   1. sshd écoute sur l'ANCIEN et le NOUVEAU port
+#   2. Ansible se reconnecte sur le nouveau port
+#   3. seulement alors, l'ancien port est retiré de sshd et du pare-feu
+# En cas d'échec à l'étape 2 : retour à l'ancien port.
+# =============================================================================
+- name: Port SSH | Handlers en attente exécutés AVANT la bascule (ils garderaient l'ancien port)
+  ansible.builtin.meta: flush_handlers
+
+- name: Port SSH | Faits
+  ansible.builtin.set_fact:
+    lynis100_port_change: >-
+      {{ (lynis100_ssh_port | int) not in lynis100_current_ssh_ports
+         or (lynis100_current_ssh_ports | length) > 1 }}
+    lynis100_ssh_socket_unit: "{{ ansible_facts.distribution == 'Ubuntu' and ansible_facts.distribution_version is version('22.10', '>=') }}"
+
+- name: Port SSH | ssh.socket actif ? (Ubuntu 22.10+)
+  ansible.builtin.command: systemctl is-enabled ssh.socket  # noqa: command-instead-of-module
+  register: lynis100_ssh_socket
+  changed_when: false
+  failed_when: false
+
+- name: Port SSH | Bascule
+  when: lynis100_port_change | bool
+  block:
+    - name: Port SSH | Étape 1 - écoute sur l'ancien et le nouveau port
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/98-lynis-to-100-port.conf
+        content: |
+          # from-lynis-to-100 : transition, l'ancien port sera retiré
+          {% for p in ([lynis100_conn_port | int] + [lynis100_ssh_port | int]) | unique %}
+          Port {{ p }}
+          {% endfor %}
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Port SSH | Contrôle de la configuration complète
+      ansible.builtin.command: /usr/sbin/sshd -t
+      changed_when: false
+
+    - name: Port SSH | Dossier ssh.socket.d
+      ansible.builtin.file:
+        path: /etc/systemd/system/ssh.socket.d
+        state: directory
+        mode: "0755"
+      when: lynis100_ssh_socket.stdout | trim == 'enabled'
+
+    - name: Port SSH | ssh.socket (Ubuntu) suit les deux ports
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ssh.socket.d/99-lynis-to-100.conf
+        content: |
+          [Socket]
+          ListenStream=
+          {% for p in ([lynis100_conn_port | int] + [lynis100_ssh_port | int]) | unique %}
+          ListenStream=0.0.0.0:{{ p }}
+          ListenStream=[::]:{{ p }}
+          {% endfor %}
+        owner: root
+        group: root
+        mode: "0644"
+      when: lynis100_ssh_socket.stdout | trim == 'enabled'
+
+    - name: Port SSH | Redémarrage (sessions existantes conservées)
+      ansible.builtin.systemd:
+        name: "{{ 'ssh.socket' if lynis100_ssh_socket.stdout | trim == 'enabled' else 'ssh' }}"
+        state: restarted
+        daemon_reload: true
+
+    - name: Port SSH | Le nouveau port écoute
+      ansible.builtin.wait_for:
+        port: "{{ lynis100_ssh_port | int }}"
+        host: 127.0.0.1
+        timeout: 30
+
+    - name: Port SSH | Étape 2 - reconnexion d'Ansible sur le nouveau port
+      when: not lynis100_is_local
+      block:
+        - name: Port SSH | Nouveau port pour la suite du play
+          ansible.builtin.set_fact:
+            ansible_port: "{{ lynis100_ssh_port | int }}"
+
+        - name: Port SSH | Fermeture de la connexion existante
+          ansible.builtin.meta: reset_connection
+
+        - name: Port SSH | Test de connexion
+          ansible.builtin.wait_for_connection:
+            timeout: 60
+
+    - name: Port SSH | Étape 3 - retrait de l'ancien port
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/98-lynis-to-100-port.conf
+        content: |
+          # from-lynis-to-100 (SSH-7408)
+          Port {{ lynis100_ssh_port | int }}
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Port SSH | Contrôle de la configuration finale
+      ansible.builtin.command: /usr/sbin/sshd -t
+      changed_when: false
+
+    - name: "Port SSH | ssh.socket (Ubuntu) : nouveau port seul"
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ssh.socket.d/99-lynis-to-100.conf
+        content: |
+          [Socket]
+          ListenStream=
+          ListenStream=0.0.0.0:{{ lynis100_ssh_port | int }}
+          ListenStream=[::]:{{ lynis100_ssh_port | int }}
+        owner: root
+        group: root
+        mode: "0644"
+      when: lynis100_ssh_socket.stdout | trim == 'enabled'
+
+    - name: Port SSH | Redémarrage final
+      ansible.builtin.systemd:
+        name: "{{ 'ssh.socket' if lynis100_ssh_socket.stdout | trim == 'enabled' else 'ssh' }}"
+        state: restarted
+        daemon_reload: true
+
+    - name: Port SSH | Pare-feu sans l'ancien port
+      when:
+        - lynis100_firewall | bool
+        - not lynis100_in_container
+        - not lynis100_docker.stat.exists
+      block:
+        - name: Port SSH | Ports TCP finaux
+          ansible.builtin.set_fact:
+            lynis100_fw_tcp_ports: >-
+              {{ lynis100_fw_tcp_ports | default([]) | reject('in', lynis100_current_ssh_ports + [lynis100_conn_port | int])
+                 | list | union([lynis100_ssh_port | int]) | sort }}
+
+        - name: Port SSH | nftables
+          ansible.builtin.template:
+            src: nftables.conf.j2
+            dest: /etc/nftables.conf
+            owner: root
+            group: root
+            mode: "0700"
+            validate: nft -c -f %s
+          register: lynis100_nft_final
+          when: not lynis100_use_ufw
+
+        - name: Port SSH | Application immédiate des règles nftables  # noqa: no-handler
+          ansible.builtin.command: nft -f /etc/nftables.conf
+          when: lynis100_nft_final is changed
+          changed_when: true
+
+        - name: Port SSH | fail2ban recrée sa table nftables  # noqa: no-handler
+          ansible.builtin.systemd:
+            name: fail2ban
+            state: restarted
+          when: lynis100_nft_final is changed
+
+        - name: "Port SSH | ufw : fermeture de l'ancien port"
+          community.general.ufw:
+            rule: allow
+            port: "{{ item }}"
+            proto: tcp
+            delete: true
+          loop: "{{ (lynis100_current_ssh_ports + [lynis100_conn_port | int]) | unique | difference([lynis100_ssh_port | int]) }}"
+          when: lynis100_use_ufw
+
+  rescue:
+    - name: "Port SSH | Échec : Ansible revient sur l'ancien port"
+      ansible.builtin.set_fact:
+        ansible_port: "{{ lynis100_conn_port | int }}"
+      when: not lynis100_is_local
+
+    - name: Port SSH | Réinitialisation de la connexion
+      ansible.builtin.meta: reset_connection
+
+    - name: Port SSH | Ancien port seul
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/98-lynis-to-100-port.conf
+        content: |
+          # from-lynis-to-100 : bascule échouée, ancien port conservé
+          Port {{ lynis100_conn_port | int }}
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Port SSH | Retrait de l'override ssh.socket
+      ansible.builtin.file:
+        path: /etc/systemd/system/ssh.socket.d/99-lynis-to-100.conf
+        state: absent
+
+    - name: Port SSH | Redémarrage sur l'ancien port
+      ansible.builtin.systemd:
+        name: "{{ 'ssh.socket' if lynis100_ssh_socket.stdout | trim == 'enabled' else 'ssh' }}"
+        state: restarted
+        daemon_reload: true
+
+    - name: Port SSH | Arrêt
+      ansible.builtin.fail:
+        msg: >-
+          La bascule vers le port {{ lynis100_ssh_port }} a échoué (pare-feu
+          intermédiaire ? port filtré ?). SSH reste sur le port {{ lynis100_conn_port }}.

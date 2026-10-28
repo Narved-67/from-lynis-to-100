@@ -1,0 +1,63 @@
+---
+# =============================================================================
+# 17 - Audit final : score, tests incomplets, redémarrage optionnel
+# =============================================================================
+- name: Audit final | Application des handlers en attente
+  ansible.builtin.meta: flush_handlers
+
+- name: Audit final | Lancement de Lynis (1 à 3 minutes)
+  ansible.builtin.command: lynis audit system --quick --no-colors
+  register: lynis100_audit_after
+  changed_when: false
+  failed_when: "'Fatal error' in lynis100_audit_after.stdout"
+
+- name: Audit final | Rapport et journal
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop: [/var/log/lynis-report.dat]
+  register: lynis100_final_files
+
+- name: Audit final | Tests n'ayant pas obtenu tous leurs points
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      grep -E 'Performing test ID|Hardening: assigned partial' /var/log/lynis.log
+      | grep -B1 'partial' | grep 'Performing test ID'
+      | sed -E 's/.*test ID ([A-Z0-9-]+) \((.*)\)/\1 : \2/' | sort -u || true
+    executable: /bin/bash
+  register: lynis100_partial_raw
+  changed_when: false
+
+- name: Audit final | Analyse
+  ansible.builtin.set_fact:
+    lynis100_score_after: >-
+      {{ (lynis100_final_files.results[0].content | b64decode
+          | regex_search('hardening_index=([0-9]+)', '\1') | default(['?'], true)) | first }}
+    lynis100_partial_tests: "{{ lynis100_partial_raw.stdout_lines }}"
+    lynis100_warnings: >-
+      {{ lynis100_final_files.results[0].content | b64decode | regex_findall('(?m)^warning\[\]=([^|]+)\|([^|]+)')
+         | map('join', ' : ') | list }}
+
+- name: Audit final | Résultat
+  ansible.builtin.debug:
+    msg:
+      - "Score Lynis : {{ lynis100_score_before | default('?') }} -> {{ lynis100_score_after }}"
+      - "Tests incomplets : {{ lynis100_partial_tests | join(' | ') if lynis100_partial_tests | length > 0 else 'aucun' }}"
+      - "Avertissements : {{ lynis100_warnings | join(' | ') if lynis100_warnings | length > 0 else 'aucun' }}"
+      - "SSH : ssh -p {{ lynis100_ssh_port }} <{{ lynis100_allow_users_final | join('|') }}>@{{ ansible_host | default(inventory_hostname) }}"
+      - "Redémarrage : {{ 'automatique' if lynis100_reboot | bool else 'conseillé (/tmp, /dev, USB, GRUB, modules)' }}"
+
+- name: Audit final | Score minimum
+  ansible.builtin.assert:
+    that: (lynis100_score_after | int) >= (lynis100_fail_below_score | int)
+    fail_msg: "Score {{ lynis100_score_after }} < {{ lynis100_fail_below_score }} demandé."
+    quiet: true
+  when: lynis100_fail_below_score | int > 0
+
+- name: Audit final | Redémarrage
+  ansible.builtin.reboot:
+    reboot_timeout: 900
+    msg: "from-lynis-to-100 : redémarrage"
+  when:
+    - lynis100_reboot | bool
+    - not lynis100_in_container

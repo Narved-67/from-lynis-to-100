@@ -1,0 +1,128 @@
+---
+# =============================================================================
+# 13 - nginx (HTTP-6710), seulement s'il est installé
+# =============================================================================
+- name: nginx | Installé ?
+  ansible.builtin.stat:
+    path: /etc/nginx/nginx.conf
+  register: lynis100_nginx_conf
+
+- name: nginx | Durcissement TLS
+  when: lynis100_nginx_conf.stat.exists
+  block:
+    - name: nginx | TLS 1.2 et 1.3 uniquement
+      ansible.builtin.replace:
+        path: /etc/nginx/nginx.conf
+        regexp: '^(\s*)ssl_protocols\s.*$'
+        replace: '\1ssl_protocols TLSv1.2 TLSv1.3;'
+      notify: Recharger nginx
+
+    - name: nginx | ssl_prefer_server_ciphers
+      ansible.builtin.lineinfile:
+        path: /etc/nginx/nginx.conf
+        insertafter: '^\s*ssl_protocols'
+        regexp: '^\s*ssl_prefer_server_ciphers'
+        line: "\tssl_prefer_server_ciphers on;"
+      notify: Recharger nginx
+
+    - name: nginx | Un certificat est-il déjà configuré ?
+      ansible.builtin.command: grep -rqs ssl_certificate /etc/nginx/
+      register: lynis100_nginx_has_cert
+      changed_when: false
+      failed_when: false
+
+    - name: nginx | vhost HTTPS auto-signé
+      when:
+        - lynis100_nginx_selfsigned_https | bool
+        - lynis100_nginx_has_cert.rc != 0
+      block:
+        - name: nginx | Dossier ssl
+          ansible.builtin.file:
+            path: /etc/nginx/ssl
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: nginx | Certificat auto-signé
+          ansible.builtin.command: >-
+            openssl req -x509 -nodes -days 365 -newkey rsa:2048
+            -subj "/CN={{ ansible_facts.fqdn | default(inventory_hostname) }}"
+            -keyout /etc/nginx/ssl/lynis-to-100.key -out /etc/nginx/ssl/lynis-to-100.crt
+          args:
+            creates: /etc/nginx/ssl/lynis-to-100.crt
+
+        - name: nginx | Droits de la clé
+          ansible.builtin.file:
+            path: /etc/nginx/ssl/lynis-to-100.key
+            mode: "0600"
+
+        - name: nginx | vhost HTTPS
+          ansible.builtin.copy:
+            dest: /etc/nginx/conf.d/99-lynis-to-100-https.conf
+            content: |
+              # from-lynis-to-100 (HTTP-6710) : certificat auto-signé à remplacer
+              server {
+                  listen 443 ssl;
+                  listen [::]:443 ssl;
+                  ssl_certificate     /etc/nginx/ssl/lynis-to-100.crt;
+                  ssl_certificate_key /etc/nginx/ssl/lynis-to-100.key;
+                  ssl_protocols TLSv1.2 TLSv1.3;
+                  server_tokens off;
+                  root /var/www/html;
+                  index index.html index.nginx-debian.html;
+                  location / { try_files $uri $uri/ =404; }
+              }
+            owner: root
+            group: root
+            mode: "0644"
+          notify: Recharger nginx
+
+        - name: nginx | Port 443 ouvert (nftables)
+          ansible.builtin.set_fact:
+            lynis100_fw_tcp_ports: "{{ (lynis100_fw_tcp_ports | default([]) + [443]) | unique | sort }}"
+
+        - name: nginx | Mise à jour du pare-feu nftables
+          ansible.builtin.template:
+            src: nftables.conf.j2
+            dest: /etc/nftables.conf
+            owner: root
+            group: root
+            mode: "0700"
+            validate: nft -c -f %s
+          notify: Recharger nftables
+          when:
+            - lynis100_firewall | bool
+            - not lynis100_use_ufw
+            - not lynis100_in_container
+            - not lynis100_docker.stat.exists
+
+        - name: nginx | Port 443 ouvert (ufw)
+          community.general.ufw:
+            rule: allow
+            port: "443"
+            proto: tcp
+          when:
+            - lynis100_firewall | bool
+            - lynis100_use_ufw
+
+    - name: nginx | Test de la configuration complète
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+  rescue:
+    - name: "nginx | Configuration invalide : retrait du vhost ajouté"
+      ansible.builtin.file:
+        path: /etc/nginx/conf.d/99-lynis-to-100-https.conf
+        state: absent
+
+    - name: nginx | Restauration de nginx.conf
+      ansible.builtin.unarchive:
+        src: "{{ lynis100_backup_dir }}/{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+        dest: /
+        remote_src: true
+        include: [etc/nginx/nginx.conf]
+
+    - name: nginx | Arrêt
+      ansible.builtin.fail:
+        msg: "nginx -t a échoué après modification : configuration restaurée."

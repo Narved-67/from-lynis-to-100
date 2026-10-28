@@ -1,0 +1,6 @@
+inventory.ini
+group_vars/*.yml
+group_vars/*/
+!group_vars/*.yml.example
+*.retry
+.vault_pass*

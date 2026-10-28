@@ -1,0 +1,138 @@
+---
+# =============================================================================
+# 11 - Comptabilité, audit, intégrité, antimalware
+# ACCT-9622 ACCT-9626 ACCT-9628 ACCT-9630 FINT-4350 FINT-4402 HRDN-7230 PKGS-7370
+# =============================================================================
+- name: Audit | Comptabilité des processus (acct)
+  ansible.builtin.systemd:
+    name: acct
+    enabled: true
+    state: started
+  failed_when: false
+
+- name: Audit | sysstat activé
+  ansible.builtin.lineinfile:
+    path: /etc/default/sysstat
+    regexp: '^ENABLED='
+    line: 'ENABLED="true"'
+    create: true
+    mode: "0644"
+
+- name: Audit | Service sysstat
+  ansible.builtin.systemd:
+    name: sysstat
+    enabled: true
+    state: started
+  failed_when: false
+
+- name: Audit | Règles auditd
+  ansible.builtin.template:
+    src: audit.rules.j2
+    dest: /etc/audit/rules.d/99-lynis-to-100.rules
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Recharger auditd
+
+- name: Audit | Service auditd
+  ansible.builtin.systemd:
+    name: auditd
+    enabled: true
+    state: started
+  register: lynis100_auditd
+  failed_when: false
+
+- name: Audit | auditd indisponible (conteneur ?)
+  ansible.builtin.debug:
+    msg: "auditd n'a pas pu démarrer : {{ lynis100_auditd.msg | default('') }}"
+  when: lynis100_auditd is failed or (lynis100_auditd.msg | default('') | length > 0)
+
+- name: Audit | debsums hebdomadaire
+  ansible.builtin.lineinfile:
+    path: /etc/default/debsums
+    regexp: '^CRON_CHECK='
+    line: CRON_CHECK=weekly
+    create: true
+    mode: "0644"
+
+- name: Intégrité | AIDE en SHA512 (FINT-4402)
+  ansible.builtin.lineinfile:
+    path: /etc/aide/aide.conf
+    regexp: '^Checksums\s*='
+    line: Checksums = sha512
+    create: false
+  register: lynis100_aide_conf
+  failed_when: false
+
+- name: Intégrité | Base AIDE existante ?
+  ansible.builtin.stat:
+    path: /var/lib/aide/aide.db
+  register: lynis100_aide_db
+
+- name: Intégrité | Initialisation de la base AIDE (plusieurs minutes)
+  ansible.builtin.command: aideinit -y -f
+  when: lynis100_aide_conf is changed or not lynis100_aide_db.stat.exists
+  changed_when: true
+  async: 3600
+  poll: 15
+  failed_when: false
+
+- name: Antimalware | Signatures ClamAV déjà présentes ?
+  ansible.builtin.find:
+    paths: /var/lib/clamav
+    patterns: "main.cvd,main.cld"
+  register: lynis100_clam_db
+
+- name: Antimalware | Premier téléchargement des signatures
+  when: lynis100_clam_db.matched == 0
+  block:
+    - name: Antimalware | Arrêt de freshclam (verrou de la base)
+      ansible.builtin.systemd:
+        name: clamav-freshclam
+        state: stopped
+      failed_when: false
+
+    - name: Antimalware | freshclam
+      ansible.builtin.command: freshclam
+      register: lynis100_freshclam
+      changed_when: lynis100_freshclam.rc == 0
+      failed_when: false
+
+    - name: Antimalware | Signatures non téléchargées
+      ansible.builtin.debug:
+        msg: "freshclam a échoué (réseau ou limite du miroir) : clamav-daemon démarrera après la 1re mise à jour réussie."
+      when: lynis100_freshclam.rc != 0
+
+- name: Antimalware | Services ClamAV
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: [clamav-freshclam, clamav-daemon]
+  failed_when: false
+
+- name: Antimalware | Base rkhunter existante ?
+  ansible.builtin.stat:
+    path: /var/lib/rkhunter/db/rkhunter.dat
+  register: lynis100_rkhunter_db
+
+- name: "Antimalware | rkhunter : base des propriétés"
+  ansible.builtin.command: rkhunter --propupd --nocolors
+  when:
+    - not (lynis100_remove_compilers | bool)
+    - not lynis100_rkhunter_db.stat.exists or lynis100_pkg_install is changed
+  changed_when: true
+  failed_when: false
+
+- name: Mail | Postfix présent ?
+  ansible.builtin.stat:
+    path: /etc/postfix/main.cf
+  register: lynis100_postfix
+
+- name: Mail | Bannière SMTP sans nom de système (MAIL-8818)
+  ansible.builtin.lineinfile:
+    path: /etc/postfix/main.cf
+    regexp: '^smtpd_banner\s*='
+    line: smtpd_banner = $myhostname ESMTP
+  when: lynis100_postfix.stat.exists
+  notify: Recharger postfix

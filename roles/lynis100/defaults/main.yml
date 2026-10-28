@@ -1,0 +1,173 @@
+---
+# =============================================================================
+# from-lynis-to-100 : variables du rôle (toutes surchargeables dans
+# group_vars/, host_vars/ ou avec -e). Préfixe : lynis100_
+# =============================================================================
+
+# ---------------------------------------------------------------- Sécurité ---
+# Le play refuse de démarrer tant que cette variable n'est pas à true.
+# Elle confirme que vous avez lu le disclaimer du README et fait un snapshot.
+lynis100_i_have_a_snapshot: false
+
+# Autoriser l'exécution dans un conteneur (UNIQUEMENT pour les tests du rôle :
+# montages, GRUB, USB et sysctl y sont ignorés).
+lynis100_allow_container: false
+
+# Répertoire de sauvegarde sur la cible (une archive par exécution)
+lynis100_backup_dir: /root/lynis-to-100-backup
+
+# Espace disque libre minimum sur / (Mo) pour continuer
+lynis100_min_free_mb: 2048
+
+# ---------------------------------------------------------------------- SSH ---
+# Nouveau port SSH. Mettre la valeur actuelle (22) pour ne pas le changer.
+lynis100_ssh_port: 2222
+# Comptes autorisés en SSH (AllowUsers). Liste vide = détection automatique :
+# comptes humains (UID >= 1000, shell valide) + l'utilisateur Ansible.
+lynis100_ssh_allow_users: []
+lynis100_ssh_max_auth_tries: 3
+lynis100_ssh_max_sessions: 2
+lynis100_ssh_client_alive_interval: 300
+lynis100_ssh_client_alive_count_max: 2
+
+# ---------------------------------------------------------------- fail2ban ---
+lynis100_fail2ban_bantime: 1h
+lynis100_fail2ban_findtime: 10m
+lynis100_fail2ban_maxretry: 5
+# IP jamais bannies (ajoutez votre poste d'administration)
+lynis100_fail2ban_ignoreip:
+  - 127.0.0.1/8
+  - ::1
+
+# ---------------------------------------------------------------- Pare-feu ---
+lynis100_firewall: true
+# Ports TCP ouverts en plus de SSH et des services déjà en écoute
+lynis100_firewall_extra_tcp_ports: []
+# Ouvrir automatiquement les ports TCP en écoute au moment de l'exécution
+lynis100_firewall_keep_listening_ports: true
+
+# --------------------------------------------------------------------- USB ---
+lynis100_disable_usb: true
+# Désactiver l'USB même sur une machine physique (clavier/souris USB perdus !)
+lynis100_disable_usb_on_bare_metal: false
+
+# ---------------------------------------------------------------- Comptes ---
+lynis100_pass_min_days: 1
+lynis100_pass_max_days: 90
+lynis100_pass_warn_age: 7
+lynis100_umask: "027"
+lynis100_sha_crypt_min_rounds: 5000
+lynis100_sha_crypt_max_rounds: 10000
+# Appliquer l'âge des mots de passe aux comptes existants (chage)
+lynis100_apply_aging_to_existing_users: true
+# Déconnexion des shells inactifs (secondes)
+lynis100_tmout: 900
+
+# Bannière légale /etc/issue et /etc/issue.net (BANN-7126/7130). Lynis compte
+# des mots-clés : access, authorized, monitor, prohibited, legal, policy...
+lynis100_banner: |
+  Authorized uses only. All activity may be monitored and reported.
+  Unauthorized access is prohibited and subject to legal action under the access policy of this private system.
+  Acces reserve aux personnes autorisees. Toute activite est journalisee.
+
+# Mettre à jour les paquets avant l'audit final (PKGS-7392 : paquets vulnérables)
+lynis100_upgrade_packages: true
+
+# ---------------------------------------------------------------- Montages ---
+lynis100_tmp_tmpfs_size: 1G
+# Créer un LV séparé pour /home si / est sur LVM et que /home n'est pas séparé
+# (ex : "2g"). Vide = ne rien créer.
+lynis100_home_lv_size: ""
+
+# -------------------------------------------------------------------- GRUB ---
+lynis100_grub_protect: true
+# Fournir SOIT le hash (recommandé, généré par grub-mkpasswd-pbkdf2),
+# SOIT le mot de passe en clair (idéalement via ansible-vault).
+lynis100_grub_user: root
+lynis100_grub_password_pbkdf2: ""
+lynis100_grub_password: ""
+
+# ------------------------------------------------------------- Compilateurs ---
+lynis100_remove_compilers: true
+lynis100_compiler_packages: [gcc, g++, cpp, binutils, clang, tcc]
+# La suppression est annulée si apt veut retirer un paquet dont le nom ne
+# commence par aucun de ces préfixes (protection contre la suppression en cascade).
+# rkhunter dépend de binutils : il est remplacé par ClamAV (HRDN-7230, MALW-3282)
+# quand les compilateurs sont supprimés.
+lynis100_compiler_removable_prefixes:
+  - rkhunter
+  - gcc
+  - g++
+  - cpp
+  - binutils
+  - clang
+  - tcc
+  - build-essential
+  - dpkg-dev
+  - make
+  - fakeroot
+  - patch
+  - manpages-dev
+  - lto-disabled-list
+  - rpcsvc-proto
+  - linux-libc-dev
+  - llvm
+  - lib32
+  - libx32
+  - libgcc
+  - libstdc++
+  - libc6-dev
+  - libc-dev
+  - libcrypt-dev
+  - libtirpc-dev
+  - libnsl-dev
+  - libbinutils
+  - libctf
+  - libgprofng
+  - libsframe
+  - libjansson
+  - libasan
+  - liblsan
+  - libtsan
+  - libubsan
+  - libhwasan
+  - libitm
+  - libquadmath
+  - libcc1
+  - libisl
+  - libmpc
+  - libmpfr
+  - libfakeroot
+  - libalgorithm
+  - libfile-fcntllock
+  - libdpkg-perl
+  - libclang
+  - libllvm
+  - libz3
+  - libobjc
+
+# ------------------------------------------------------------------- nginx ---
+# Ajouter un vhost HTTPS auto-signé si nginx est installé sans certificat
+lynis100_nginx_selfsigned_https: true
+
+# --------------------------------------------------------------------- DNS ---
+# Installer dnsmasq en résolveur local si un seul DNS est configuré
+lynis100_dns_local_resolver: true
+
+# ------------------------------------------------------------- Exceptions ---
+lynis100_exceptions: true
+# Exceptions écrites dans /etc/lynis/custom.prf (ASCII uniquement !)
+lynis100_skip_tests:
+  - {id: "BOOT-5180", why: "Test informatif (runlevel), aucune action possible"}
+  - {id: "BOOT-5264", why: "Durcissement systemd service par service hors perimetre"}
+  - {id: "LOGG-2154", why: "Pas de serveur syslog distant"}
+  - {id: "TOOL-5002", why: "Gestion de configuration externe (Ansible)"}
+  - {id: "KRNL-6000:kernel.modules_disabled", why: "1 empeche tout chargement de module"}
+  - {id: "MALW-3280", why: "ClamAV actif mais ce test ne detecte que les antivirus commerciaux ou Wazuh"}
+# DEB-0510 est ajouté automatiquement si / n'est pas chiffré
+
+# ------------------------------------------------------------------- Audit ---
+# Faire échouer le play si le score final est inférieur (0 = jamais)
+lynis100_fail_below_score: 0
+# Redémarrer à la fin (attention : phrase de passe LUKS à saisir en console)
+lynis100_reboot: false

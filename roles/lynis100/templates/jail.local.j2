@@ -1,0 +1,13 @@
+# {{ ansible_managed }}
+# from-lynis-to-100 (DEB-0880, TOOL-5104)
+[DEFAULT]
+bantime  = {{ lynis100_fail2ban_bantime }}
+findtime = {{ lynis100_fail2ban_findtime }}
+maxretry = {{ lynis100_fail2ban_maxretry }}
+banaction = {{ 'ufw' if lynis100_use_ufw else 'nftables' }}
+ignoreip = {{ lynis100_fail2ban_ignoreip | join(' ') }}
+
+[sshd]
+enabled = true
+backend = systemd
+port    = {{ ([lynis100_ssh_port | int] + lynis100_current_ssh_ports) | unique | join(',') }}

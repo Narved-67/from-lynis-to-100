@@ -1,0 +1,98 @@
+---
+# =============================================================================
+# 09 - USB (USB-2000 USB-3000)
+# Lynis exige authorized=0 sur CHAQUE bus USB (USB-2000) et une configuration
+# USBGuard précise (USB-3000). Résultat : tout l'USB est inutilisable.
+# =============================================================================
+- name: USB | Non modifié
+  ansible.builtin.debug:
+    msg: >-
+      USB non modifié ({{ 'conteneur' if lynis100_in_container
+      else ('machine physique : lynis100_disable_usb_on_bare_metal=false' if lynis100_virt == 'none'
+      else 'lynis100_disable_usb=false') }}). USB-2000/USB-3000 : jusqu'à 11 points perdus.
+  when: not lynis100_usb_allowed
+
+- name: USB | Configuration
+  when: lynis100_usb_allowed
+  block:
+    - name: USB | usbguard installé ?
+      ansible.builtin.stat:
+        path: /usr/sbin/usbguard-daemon
+      register: lynis100_usbguard_bin
+
+    - name: USB | usbguard absent
+      ansible.builtin.debug:
+        msg: "usbguard n'a pas pu être installé : USB-3000 (8 points) perdu."
+      when: not lynis100_usbguard_bin.stat.exists
+
+    - name: USB | Règles USBGuard vides (tout est bloqué)
+      ansible.builtin.copy:
+        dest: /etc/usbguard/rules.conf
+        content: ""
+        owner: root
+        group: root
+        mode: "0600"
+      when: lynis100_usbguard_bin.stat.exists
+      notify: Redémarrer usbguard
+
+    - name: USB | Paramètres usbguard-daemon.conf contrôlés par Lynis
+      ansible.builtin.lineinfile:
+        path: /etc/usbguard/usbguard-daemon.conf
+        regexp: '^#?{{ item.key }}='
+        line: "{{ item.key }}={{ item.value }}"
+      loop: "{{ lynis100_usbguard_settings | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}={{ item.value }}"
+      when: lynis100_usbguard_bin.stat.exists
+      notify: Redémarrer usbguard
+
+    - name: USB | Service usbguard
+      ansible.builtin.systemd:
+        name: usbguard
+        enabled: true
+        state: started
+      when: lynis100_usbguard_bin.stat.exists
+
+    - name: USB | Script de désactivation des bus USB
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/lynis100-usb-deauthorize
+        content: |
+          #!/bin/sh
+          # from-lynis-to-100 (USB-2000) : authorized=0 sur chaque bus USB
+          for d in /sys/bus/usb/devices/usb*; do
+            [ -e "$d/authorized_default" ] && echo 0 > "$d/authorized_default"
+            [ -e "$d/authorized" ] && echo 0 > "$d/authorized"
+          done
+          exit 0
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: USB | Service de désactivation des bus USB
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/lynis100-usb-deauthorize.service
+        content: |
+          # from-lynis-to-100 (USB-2000)
+          [Unit]
+          Description=from-lynis-to-100 : desactive les bus USB
+          After=usbguard.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/lynis100-usb-deauthorize
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+        owner: root
+        group: root
+        mode: "0644"
+      register: lynis100_usb_unit
+
+    - name: USB | Activation et exécution
+      ansible.builtin.systemd:
+        name: lynis100-usb-deauthorize.service
+        enabled: true
+        state: restarted
+        daemon_reload: true
+      changed_when: lynis100_usb_unit is changed

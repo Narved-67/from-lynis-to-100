@@ -1,0 +1,80 @@
+---
+# =============================================================================
+# 04 - Shells inactifs et core dumps
+# SHLL-6220 KRNL-5820
+# =============================================================================
+- name: Shell | TMOUT en lecture seule
+  ansible.builtin.copy:
+    dest: /etc/profile.d/99-lynis100-tmout.sh
+    content: |
+      # from-lynis-to-100 (SHLL-6220)
+      TMOUT={{ lynis100_tmout }}
+      readonly TMOUT
+      export TMOUT
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Core dumps | ulimit -c 0 (Lynis lit /etc/profile.d/*.sh)
+  ansible.builtin.copy:
+    dest: /etc/profile.d/99-lynis100-coredump.sh
+    content: |
+      # from-lynis-to-100 (KRNL-5820)
+      ulimit -c 0
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Core dumps | Saut de ligne final de limits.conf (sinon la ligne ajoutée se colle au commentaire)
+  ansible.builtin.shell:
+    cmd: |
+      set -eo pipefail
+      f=/etc/security/limits.conf
+      [ -s "$f" ] || exit 0
+      if [ "$(tail -c1 "$f" | od -An -c | tr -d ' ')" != '\n' ]; then echo >> "$f"; echo fixed; fi
+      if grep -qE '^# End of file\*' "$f"; then sed -i 's/^\(# End of file\)\(\*.*\)$/\1\n\2/' "$f"; echo fixed; fi
+    executable: /bin/bash
+  register: lynis100_limits_nl
+  changed_when: "'fixed' in lynis100_limits_nl.stdout"
+
+- name: Core dumps | Limites soft et hard à 0
+  ansible.builtin.copy:
+    dest: /etc/security/limits.d/99-lynis100-coredump.conf
+    content: |
+      # from-lynis-to-100 (KRNL-5820)
+      *    soft    core    0
+      *    hard    core    0
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Core dumps | systemd-coredump (fichier principal)
+  community.general.ini_file:
+    path: /etc/systemd/coredump.conf
+    section: Coredump
+    option: "{{ item.key }}"
+    value: "{{ item.value }}"
+    no_extra_spaces: true
+    mode: "0644"
+  loop:
+    - {key: Storage, value: none}
+    - {key: ProcessSizeMax, value: "0"}
+
+- name: Core dumps | Dossier drop-in systemd-coredump
+  ansible.builtin.file:
+    path: /etc/systemd/coredump.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Core dumps | systemd-coredump (drop-in)
+  ansible.builtin.copy:
+    dest: /etc/systemd/coredump.conf.d/99-lynis100.conf
+    content: |
+      [Coredump]
+      Storage=none
+      ProcessSizeMax=0
+    owner: root
+    group: root
+    mode: "0644"
