@@ -79,7 +79,7 @@ Lynis, `dig` et tous les paquets nécessaires sont **installés par le script**.
 ## Utilisation
 
 ```bash
-git clone https://github.com/<votre-compte>/from-lynis-to-100.git
+git clone https://github.com/Narved-67/from-lynis-to-100.git
 cd from-lynis-to-100
 chmod +x lynis-to-100.sh
 sudo ./lynis-to-100.sh
