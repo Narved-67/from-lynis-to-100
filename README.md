@@ -17,46 +17,36 @@ puis relance l'audit et affiche le score avec les tests encore incomplets.
 
 ---
 
-## ⚡ Fast use (machine vierge)
+## ⚡ Fast use : une seule commande
 
-Rien n'est supposé installé. **curl** est l'outil de téléchargement le plus
-transverse (présent d'origine sur Fedora, RHEL, Arch et Ubuntu, installable en
-une commande sur Debian).
+En **root** (`su -` sur Debian, `sudo -i` ailleurs), sur la machine à durcir :
 
 ```bash
-# 0. Passer root
-su -        # Debian (mot de passe root) — ou : sudo -i (Ubuntu, Fedora, RHEL, Arch)
-
-# 1. curl (téléchargement) + tar et gzip (décompression du .tar.gz)
-if   command -v apt-get >/dev/null; then apt-get update -q && apt-get install -y curl tar gzip ca-certificates
-elif command -v dnf     >/dev/null; then dnf install -y curl tar gzip
-elif command -v pacman  >/dev/null; then pacman -Sy --noconfirm --needed curl tar gzip
-fi
-
-# 2. Télécharger et décompresser le projet (git inutile)
-mkdir -p ~/from-lynis-to-100
-curl -fsSL https://github.com/Narved-67/from-lynis-to-100/archive/refs/heads/main.tar.gz \
-  | tar xz --strip-components=1 -C ~/from-lynis-to-100
-
-# 3. Prérequis → vérification (--version) → Ansible → récapitulatif
-bash ~/from-lynis-to-100/lancer.sh
+command -v curl >/dev/null || { apt-get update -q && apt-get install -y curl; } || dnf install -y curl || pacman -Sy --noconfirm curl; bash <(curl -fsSL https://raw.githubusercontent.com/Narved-67/from-lynis-to-100/main/install.sh)
 ```
 
-`lancer.sh` enchaîne trois étapes ; **chacune ne démarre que si la précédente a réussi** :
+Cette ligne installe curl s'il manque, puis lance [`install.sh`](install.sh),
+qui fait tout le reste. Chaque étape ne démarre que si la précédente a réussi :
 
-| Étape | Script | Ce qui est fait | Si ça échoue |
+| # | Script | Ce qui est fait | Si ça échoue |
 |---|---|---|---|
-| 1 | [`prerequis.sh`](prerequis.sh) | Dépôts (Debian sans réseau corrigée, EPEL), python3, python3-apt, python3-venv, Ansible ≥ 2.15 (version récente dans `/opt/lynis100-ansible` si la distribution est trop ancienne), collections, `inventory.ini` | Arrêt, rien n'est durci |
-| 2 | [`verif_prerequis.sh`](verif_prerequis.sh) | `--version` de curl, tar, gzip, python3, systemd, ansible, ansible-playbook, ansible-galaxy, python3-apt ; versions minimales ; fichiers du projet ; `--syntax-check` | Liste des prérequis en échec, Ansible n'est pas lancé |
-| 3 | `ansible-playbook site.yml` | Questionnaire, durcissement, **récapitulatif final** | — |
+| 1 | [`install.sh`](install.sh) | curl, tar, gzip ; téléchargement et décompression du projet dans `~/from-lynis-to-100` (git inutile) | Arrêt |
+| 2 | [`prerequis.sh`](prerequis.sh) | Dépôts (Debian sans réseau corrigée, EPEL), python3, python3-apt, python3-venv, Ansible ≥ 2.15 (version récente dans `/opt/lynis100-ansible` si la distribution est trop ancienne), collections, `inventory.ini` | Arrêt, rien n'est durci |
+| 3 | [`verif_prerequis.sh`](verif_prerequis.sh) | `--version` de chaque prérequis, versions minimales, fichiers du projet, `--syntax-check` | Liste des échecs, Ansible n'est pas lancé |
+| 4 | `ansible-playbook site.yml` | Questionnaire, durcissement, **récapitulatif final** avec « À faire à la main » | — |
 
-Le récapitulatif final liste ce qui n'a pas fonctionné et une section
-**« À faire à la main »** : pour chaque échec, la commande pour rejouer l'étape
-(`--tags`) une fois corrigée ; pour chaque test Lynis non validé, la commande
-`lynis show details <TEST>` et la page CISOfy du test.
+Le récapitulatif final liste ce qui n'a pas fonctionné et, pour chaque point,
+quoi faire à la main : la commande pour rejouer l'étape (`--tags`) une fois
+corrigée, ou `lynis show details <TEST>` et la page CISOfy du test.
 
-Pour relancer plus tard : `bash ~/from-lynis-to-100/lancer.sh` (les options
-sont transmises à Ansible, ex. `bash lancer.sh -e lynis100_reask=true`).
+| Besoin | Commande |
+|---|---|
+| Lire le script avant de l'exécuter | `curl -fsSL https://raw.githubusercontent.com/Narved-67/from-lynis-to-100/main/install.sh \| less` |
+| Relancer plus tard | `bash ~/from-lynis-to-100/lancer.sh` |
+| Reposer les questions | ajouter `-e lynis100_reask=true` à la fin de la commande |
+
+`bash <(curl ...)` (et non `curl ... | bash`) garde le clavier disponible pour
+le questionnaire.
 
 ---
 

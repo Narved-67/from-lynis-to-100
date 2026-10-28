@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# from-lynis-to-100 : enchaînement complet
+# from-lynis-to-100 : enchaînement complet (lancé par install.sh)
 #   1. prerequis.sh       installe tous les prérequis (arrêt à la 1re erreur)
 #   2. verif_prerequis.sh vérifie chaque prérequis avec --version (arrêt si un manque)
 #   3. ansible-playbook   questionnaire, durcissement, récapitulatif final
