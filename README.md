@@ -17,6 +17,28 @@ puis relance l'audit et affiche le score avec les tests encore incomplets.
 
 ---
 
+## ⚡ Fast use
+
+Sur la machine à durcir (installation de git + Ansible, téléchargement, lancement
+en local). Le playbook pose ensuite ses questions.
+
+**Debian avec mot de passe root (`su`)** :
+
+```bash
+su -c 'if command -v apt-get >/dev/null; then apt-get update && apt-get install -y git ansible; elif command -v dnf >/dev/null; then dnf -y install git ansible-core; elif command -v pacman >/dev/null; then pacman -Sy --noconfirm --needed git ansible; fi' && { git clone https://github.com/Narved-67/from-lynis-to-100.git ~/from-lynis-to-100 2>/dev/null || git -C ~/from-lynis-to-100 pull; } && cd ~/from-lynis-to-100 && ansible-galaxy collection install -r requirements.yml && printf '[lynis_targets]\nlocalhost ansible_connection=local ansible_become_method=su\n' > inventory.ini && ansible-playbook site.yml -K
+```
+
+**Ubuntu / Fedora / RHEL / Arch avec `sudo`** :
+
+```bash
+sudo sh -c 'if command -v apt-get >/dev/null; then apt-get update && apt-get install -y git ansible; elif command -v dnf >/dev/null; then dnf -y install git ansible-core; elif command -v pacman >/dev/null; then pacman -Sy --noconfirm --needed git ansible; fi' && { git clone https://github.com/Narved-67/from-lynis-to-100.git ~/from-lynis-to-100 2>/dev/null || git -C ~/from-lynis-to-100 pull; } && cd ~/from-lynis-to-100 && ansible-galaxy collection install -r requirements.yml && printf '[lynis_targets]\nlocalhost ansible_connection=local ansible_become_method=sudo\n' > inventory.ini && ansible-playbook site.yml -K
+```
+
+`-K` demande le mot de passe root (`su`) ou celui de votre compte (`sudo`).
+Relancer la même commande met le dépôt à jour et réexécute le playbook.
+
+---
+
 ## ⚠️ Disclaimer — lisez avant de lancer
 
 Ce rôle applique un durcissement **agressif**, pensé pour un **serveur de lab,
