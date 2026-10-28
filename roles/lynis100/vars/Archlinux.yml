@@ -10,7 +10,7 @@ lynis100_family_packages:
   - clamav
   - usbguard
   - e2fsprogs
-lynis100_base_tools: [iproute2, util-linux, procps-ng, openssl, openssh, bind]
+lynis100_base_tools: [tar, gzip, iproute2, util-linux, procps-ng, openssl, openssh, bind]
 lynis100_lynis_pkg: lynis
 lynis100_rkhunter_pkg: rkhunter
 lynis100_nftables_pkg: nftables

@@ -100,3 +100,15 @@ VM VMware, Debian 13.7 netinst, une seule partition, exécution en local
 Corrections : `fail_msg` évalué même quand l'assertion passe (clé absente en
 mode `assume_yes`) → `default('')` ; barre arrondie à 100 % pour 99 → arrondi
 inférieur ; ligne du journal en double après un échec ignoré → ordre corrigé.
+
+## Passe 6 — Prérequis installés et vérifiés au début
+
+| Contrôle | Résultat |
+|---|---|
+| `shellcheck prerequis.sh`, `bash -n` | ✅ |
+| `ansible-lint` production | ✅ |
+| `prerequis.sh` sur Ubuntu 24.04 sans Ansible (réel, root) | ✅ ansible installé, collections OK, projet téléchargé, syntax-check OK, code 0 |
+| Python système sans module `apt_pkg` | ✅ détecté, arrêt avec code 1 : le playbook n'est pas lancé |
+| Lancement sans être root | ✅ arrêt immédiat, code 1 |
+| Installation d'Ansible récent dans `/opt/lynis100-ansible` (distribution trop ancienne) | ⚠️ non exécutée (pas de Debian 12 / Ubuntu 22.04 de test) |
+| Préflight du rôle : commandes requises vérifiées avant modification | ✅ lint + syntaxe ; à confirmer sur VM |

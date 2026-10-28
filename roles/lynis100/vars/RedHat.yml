@@ -15,7 +15,7 @@ lynis100_family_packages:
   - usbguard
   - e2fsprogs
   - policycoreutils-python-utils
-lynis100_base_tools: [iproute, util-linux, procps-ng, openssl, grub2-tools-minimal, openssh-server, bind-utils]
+lynis100_base_tools: [tar, gzip, iproute, util-linux, procps-ng, openssl, grub2-tools-minimal, openssh-server, bind-utils]
 lynis100_lynis_pkg: lynis
 lynis100_rkhunter_pkg: rkhunter
 lynis100_nftables_pkg: nftables

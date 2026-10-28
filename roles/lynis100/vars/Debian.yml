@@ -20,7 +20,7 @@ lynis100_family_packages:
   - clamav-freshclam
   - usbguard
   - e2fsprogs
-lynis100_base_tools: [iproute2, util-linux, procps, openssl, grub-common, openssh-server, python3-apt, bind9-dnsutils]
+lynis100_base_tools: [tar, gzip, iproute2, util-linux, procps, openssl, grub-common, openssh-server, python3-apt, bind9-dnsutils]
 lynis100_lynis_pkg: lynis
 lynis100_rkhunter_pkg: rkhunter
 lynis100_nftables_pkg: nftables

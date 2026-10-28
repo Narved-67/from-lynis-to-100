@@ -191,3 +191,7 @@ lynis100_exception_unpartitioned: true
 lynis100_fail_below_score: 0
 # Redémarrer à la fin (attention : phrase de passe LUKS à saisir en console)
 lynis100_reboot: false
+
+# ------------------------------------------------------------------ Prérequis ---
+# false : le rôle s'arrête si un paquet de sécurité ne peut pas être installé
+lynis100_allow_missing_packages: false

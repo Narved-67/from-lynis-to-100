@@ -10,11 +10,6 @@
     - ansible_facts.os_family == 'Debian'
     - lynis100_listbugs_pin.stat.exists
 
-- name: Audit initial | Installation de Lynis
-  ansible.builtin.package:
-    name: "{{ lynis100_lynis_pkg }}"
-    state: present
-
 - name: Audit initial | Lancement de Lynis (1 à 3 minutes)
   ansible.builtin.command: lynis audit system --quick --no-colors
   register: lynis100_audit_before

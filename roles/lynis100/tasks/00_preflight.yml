@@ -111,10 +111,29 @@
     update_cache: true
   when: ansible_facts.os_family == 'Archlinux'
 
-- name: Préflight | Outils de base nécessaires au rôle
+- name: Préflight | Outils nécessaires au rôle (dont Lynis)
   ansible.builtin.package:
-    name: "{{ lynis100_base_tools }}"
+    name: "{{ lynis100_base_tools + [lynis100_lynis_pkg] }}"
     state: present
+  register: lynis100_tools_install
+  retries: 2
+  delay: 10
+  until: lynis100_tools_install is succeeded
+
+- name: Préflight | Vérification des commandes requises (arrêt si une seule manque)
+  ansible.builtin.shell: command -v {{ item | quote }}  # noqa: command-instead-of-shell (command -v est un builtin)
+  loop: "{{ lynis100_required_cmds }}"
+  register: lynis100_cmd_check
+  changed_when: false
+  failed_when: false
+
+- name: Préflight | Prérequis complets
+  ansible.builtin.assert:
+    that: lynis100_cmd_check.results | selectattr('rc', 'ne', 0) | list | length == 0
+    fail_msg: >-
+      Commandes introuvables : {{ lynis100_cmd_check.results | selectattr('rc', 'ne', 0) | map(attribute='item') | join(', ') }}.
+      Rien n'a été modifié. Relancez prerequis.sh ou installez-les, puis relancez.
+    success_msg: "Prérequis complets : {{ lynis100_required_cmds | join(', ') }}"
 
 # ---------------------------------------------------------------------- Réseau / SSH
 - name: Préflight | Ports TCP en écoute

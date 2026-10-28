@@ -17,58 +17,46 @@ puis relance l'audit et affiche le score avec les tests encore incomplets.
 
 ---
 
-## ⚡ Fast use (machine vierge, sans git)
+## ⚡ Fast use (machine vierge)
 
-À lancer **sur la machine à durcir, en root**. Rien n'est modifié par le
-durcissement avant l'étape 5, qui commence par le questionnaire.
-
-**0. Passer root**
+Le projet part du principe que **rien n'est installé**. Le script
+[`prerequis.sh`](prerequis.sh) installe et **vérifie** tous les prérequis
+(Ansible, collections, Python, curl...) ; s'il en manque un seul, il s'arrête
+et **le durcissement n'est pas lancé**.
 
 ```bash
+# 0. Passer root
 su -        # Debian (mot de passe root) — ou : sudo -i (Ubuntu, Fedora, RHEL, Arch)
-```
 
-**1 à 5. Copier-coller tout le bloc**
-
-```bash
-# 1. Prérequis : Ansible et curl (détection automatique de la distribution)
-if command -v apt-get >/dev/null; then
-  apt-get update && apt-get install -y ansible curl            # Debian, Ubuntu
-elif command -v dnf >/dev/null; then
-  dnf install -y epel-release 2>/dev/null                      # Rocky, Alma (EPEL)
-  dnf install -y ansible curl                                  # Fedora, RHEL, Rocky, Alma
-elif command -v pacman >/dev/null; then
-  pacman -Sy --noconfirm --needed ansible curl                 # Arch
+# 1. Installer curl, le seul outil nécessaire pour télécharger le script
+if command -v apt-get >/dev/null; then apt-get update && apt-get install -y curl ca-certificates
+elif command -v dnf >/dev/null;   then dnf install -y curl
+elif command -v pacman >/dev/null; then pacman -Sy --noconfirm --needed curl
 fi
 
-# 2. Télécharger et décompresser le projet (archive .tar.gz, sans git)
-#    Relancer cette étape met le projet à jour, inventory.ini est conservé
-mkdir -p ~/from-lynis-to-100
-curl -fsSL https://github.com/Narved-67/from-lynis-to-100/archive/refs/heads/main.tar.gz \
-  | tar xz --strip-components=1 -C ~/from-lynis-to-100
-cd ~/from-lynis-to-100
+# 2. Télécharger le script des prérequis (et le lire avant, si vous voulez)
+curl -fsSL https://raw.githubusercontent.com/Narved-67/from-lynis-to-100/main/prerequis.sh -o prerequis.sh
+less prerequis.sh
 
-# 3. Collections Ansible : installées seulement si elles manquent
-ansible-galaxy collection list community.general 2>/dev/null | grep -q community.general \
-  || ansible-galaxy collection install -r requirements.yml
-
-# 4. Cible = cette machine
-cat > inventory.ini <<'EOF'
-[lynis_targets]
-localhost ansible_connection=local ansible_become_method=su
-EOF
-
-# 5. Lancer : questions, puis durcissement
-ansible-playbook site.yml
+# 3. Prérequis, puis durcissement SEULEMENT si tous les prérequis sont validés
+bash prerequis.sh && cd ~/from-lynis-to-100 && ansible-playbook site.yml
 ```
 
-| Prérequis | Installé par |
-|---|---|
-| Ansible (avec les collections `ansible.posix`, `community.general`), curl | Étape 1 |
-| Projet | Étape 2 (archive GitHub, git inutile) |
-| Python, Lynis, outils de sécurité | Le playbook lui-même |
+| Étape de `prerequis.sh` | Ce qui est fait | Arrêt si |
+|---|---|---|
+| 1. Contrôles de base | root, distribution, systemd | pas root, apt/dnf/pacman absent, pas de systemd |
+| 2. Dépôts | Debian installée sans réseau : source cdrom désactivée, `deb.debian.org` ajouté ; EPEL + CRB (Rocky, Alma, RHEL) ; mise à jour des index | dépôts injoignables |
+| 3. Paquets | ca-certificates, curl, tar, gzip, python3, python3-apt, python3-venv, ansible | installation en échec |
+| 4. Version d'Ansible | ansible-core ≥ 2.15 ; sinon version récente dans `/opt/lynis100-ansible` (Debian 12, Ubuntu 22.04) | version toujours trop ancienne |
+| 5. Collections | ansible.posix ≥ 1.5, community.general ≥ 8 (installées si absentes ou anciennes) | galaxy injoignable |
+| 6. Projet | archive GitHub dans `~/from-lynis-to-100`, `inventory.ini` créé (conservé s'il existe) | github.com injoignable |
+| 7. Vérification finale | chaque commande, python3-apt, fichiers du projet, `--syntax-check` du playbook | un seul élément manquant |
 
-RHEL 9 : activer EPEL avant l'étape 1 ([doc Fedora](https://docs.fedoraproject.org/en-US/epel/)).
+Le playbook revérifie ensuite ses propres outils (Lynis, `ss`, `dig`, `openssl`,
+`sshd`, `grub-mkpasswd`...) et ses paquets de sécurité **avant toute
+modification** : s'il en manque un, il s'arrête sans rien changer.
+
+Pour relancer plus tard : `bash ~/from-lynis-to-100/prerequis.sh && cd ~/from-lynis-to-100 && ansible-playbook site.yml`
 
 ---
 
@@ -126,23 +114,27 @@ exécutez sur vos machines.
 
 ## Prérequis
 
-**Sur le poste de contrôle**
+**Exécution locale (Fast use)** : rien à installer à la main, `prerequis.sh`
+installe et vérifie tout (voir plus haut).
 
-- ansible-core ≥ 2.15
-- Collections `ansible.posix` et `community.general` :
-  `ansible-galaxy collection install -r requirements.yml`
-- Accès SSH à la cible (clé conseillée)
+**Exécution à distance (poste de contrôle → cible)**
 
-**Sur la cible**
+- Poste de contrôle : ansible-core ≥ 2.15, collections `ansible.posix` ≥ 1.5 et
+  `community.general` ≥ 8 (`ansible-galaxy collection install -r requirements.yml`),
+  accès SSH à la cible (clé conseillée). `prerequis.sh` peut aussi servir à préparer ce poste.
+- Cible : un compte accessible en SSH, avec `sudo` **ou** le mot de passe root (`su`).
+  Python 3 est installé par le playbook s'il manque.
+
+**Dans tous les cas, sur la cible**
 
 - Debian 12/13, Ubuntu 22.04/24.04, RHEL-like 9 / Fedora ou Arch, avec systemd et accès Internet aux dépôts
-- Un compte non-root accessible en SSH, avec `sudo` **ou** le mot de passe root (`su`)
 - 2 Go libres sur `/`
 - Pour 100 : installer Debian avec le partitionnement **« Partitions /home, /var et /tmp séparées »** (LVM conseillé). Sinon, FILE-6310 (1 point par dossier non séparé) est ajouté en exception justifiée
 
-Python 3, `python3-apt`, Lynis, `dig`, `nft`, `ss`, `findmnt`, `openssl`,
-`grub-mkpasswd-pbkdf2` et tous les paquets de sécurité sont **installés par le
-playbook**.
+Ordre de sécurité : `prerequis.sh` (arrêt si un prérequis manque) → préflight
+du rôle (outils : Lynis, `ss`, `dig`, `openssl`, `sshd`, `grub-mkpasswd`… installés
+puis vérifiés, arrêt si l'un manque) → paquets de sécurité (arrêt si l'un n'a pas
+pu être installé, sauf `-e lynis100_allow_missing_packages=true`) → durcissement.
 
 ## Utilisation
 

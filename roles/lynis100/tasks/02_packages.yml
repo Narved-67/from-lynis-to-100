@@ -45,11 +45,19 @@
          else (lynis100_pkg_install_other.results | default([]) | selectattr('failed', 'defined')
                | selectattr('failed') | map(attribute='item') | list) }}
 
-- name: Paquets | Paquets introuvables dans les dépôts
+- name: Paquets | Tous les paquets de sécurité sont installés (arrêt sinon)
+  ansible.builtin.assert:
+    that: lynis100_pkgs_missing | length == 0 or (lynis100_allow_missing_packages | bool)
+    fail_msg: >-
+      Paquets non installés : {{ lynis100_pkgs_missing | join(', ') }}.
+      Arrêt avant toute modification de configuration. Vérifiez les dépôts
+      (EPEL, universe...) ou relancez avec -e lynis100_allow_missing_packages=true
+      (les tests Lynis correspondants perdront des points).
+    success_msg: "Paquets de sécurité installés : {{ lynis100_security_packages | join(', ') }}"
+
+- name: Paquets | Paquets manquants acceptés
   ansible.builtin.debug:
-    msg: >-
-      Non installés (les tests Lynis correspondants perdront des points) :
-      {{ lynis100_pkgs_missing | join(', ') }}
+    msg: "Non installés (points Lynis perdus) : {{ lynis100_pkgs_missing | join(', ') }}"
   when: lynis100_pkgs_missing | length > 0
 
 - name: Paquets | Mise à jour de sécurité du système (PKGS-7392)

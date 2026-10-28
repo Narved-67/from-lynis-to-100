@@ -80,3 +80,8 @@ lynis100_mount_defaults:
   /dev: {src: devtmpfs, fstype: devtmpfs}
   /dev/shm: {src: tmpfs, fstype: tmpfs}
   /tmp: {src: tmpfs, fstype: tmpfs, extra: "mode=1777,size={{ lynis100_tmp_tmpfs_size }}"}
+
+# Commandes vérifiées au préflight : le rôle s'arrête avant toute modification si l'une manque
+lynis100_required_cmds: >-
+  {{ ['python3', 'systemctl', 'ss', 'findmnt', 'sysctl', 'openssl', 'dig', 'tar', 'gzip', 'lynis', lynis100_sshd_bin]
+     + ([lynis100_grub_mkpasswd] if (lynis100_grub_protect | bool) and not (lynis100_in_container | default(false)) else []) }}
