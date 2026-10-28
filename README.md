@@ -17,53 +17,58 @@ puis relance l'audit et affiche le score avec les tests encore incomplets.
 
 ---
 
-## ⚡ Fast use (sans git)
+## ⚡ Fast use (machine vierge, sans git)
 
-À lancer **sur la machine à durcir**, étape par étape. Le projet est téléchargé
-sous forme d'archive compressée (`.tar.gz`) : **git n'est pas nécessaire**.
-Rien n'est modifié avant l'étape 5, qui commence par le questionnaire.
+À lancer **sur la machine à durcir, en root**. Rien n'est modifié par le
+durcissement avant l'étape 5, qui commence par le questionnaire.
 
-**1. Installer les prérequis : Ansible et curl** (la ligne de votre distribution)
-
-| Distribution | Commande |
-|---|---|
-| Debian (mot de passe root) | `su -c "apt-get update && apt-get install -y ansible curl"` |
-| Ubuntu | `sudo apt-get update && sudo apt-get install -y ansible curl` |
-| Fedora | `sudo dnf install -y ansible curl` |
-| Rocky / Alma 9 | `sudo dnf install -y epel-release && sudo dnf install -y ansible curl` |
-| RHEL 9 | activer EPEL ([doc Fedora](https://docs.fedoraproject.org/en-US/epel/)), puis `sudo dnf install -y ansible curl` |
-| Arch | `sudo pacman -Sy --needed ansible curl` |
-
-Le paquet `ansible` (et non `ansible-core`) contient déjà les collections
-`ansible.posix` et `community.general` utilisées par le rôle. Python, Lynis et
-tous les outils de sécurité sont installés ensuite par le playbook lui-même.
-
-**2 à 5. Télécharger, préparer, lancer**
+**0. Passer root**
 
 ```bash
-# 2. Télécharger et décompresser le projet dans ~/from-lynis-to-100
-#    (relancer cette commande met le projet à jour, inventory.ini est conservé)
+su -        # Debian (mot de passe root) — ou : sudo -i (Ubuntu, Fedora, RHEL, Arch)
+```
+
+**1 à 5. Copier-coller tout le bloc**
+
+```bash
+# 1. Prérequis : Ansible et curl (détection automatique de la distribution)
+if command -v apt-get >/dev/null; then
+  apt-get update && apt-get install -y ansible curl            # Debian, Ubuntu
+elif command -v dnf >/dev/null; then
+  dnf install -y epel-release 2>/dev/null                      # Rocky, Alma (EPEL)
+  dnf install -y ansible curl                                  # Fedora, RHEL, Rocky, Alma
+elif command -v pacman >/dev/null; then
+  pacman -Sy --noconfirm --needed ansible curl                 # Arch
+fi
+
+# 2. Télécharger et décompresser le projet (archive .tar.gz, sans git)
+#    Relancer cette étape met le projet à jour, inventory.ini est conservé
 mkdir -p ~/from-lynis-to-100
 curl -fsSL https://github.com/Narved-67/from-lynis-to-100/archive/refs/heads/main.tar.gz \
   | tar xz --strip-components=1 -C ~/from-lynis-to-100
 cd ~/from-lynis-to-100
 
-# 3. Collections Ansible : installées seulement si elles manquent (ansible-core seul)
+# 3. Collections Ansible : installées seulement si elles manquent
 ansible-galaxy collection list community.general 2>/dev/null | grep -q community.general \
   || ansible-galaxy collection install -r requirements.yml
 
-# 4. Cible = cette machine. Remplacer "su" par "sudo" si vous utilisez sudo
+# 4. Cible = cette machine
 cat > inventory.ini <<'EOF'
 [lynis_targets]
 localhost ansible_connection=local ansible_become_method=su
 EOF
 
-# 5. Lancer : questions, puis durcissement (-K demande le mot de passe root ou sudo)
-ansible-playbook site.yml -K
+# 5. Lancer : questions, puis durcissement
+ansible-playbook site.yml
 ```
 
-Avec git, l'étape 2 peut être remplacée par
-`git clone https://github.com/Narved-67/from-lynis-to-100.git ~/from-lynis-to-100`.
+| Prérequis | Installé par |
+|---|---|
+| Ansible (avec les collections `ansible.posix`, `community.general`), curl | Étape 1 |
+| Projet | Étape 2 (archive GitHub, git inutile) |
+| Python, Lynis, outils de sécurité | Le playbook lui-même |
+
+RHEL 9 : activer EPEL avant l'étape 1 ([doc Fedora](https://docs.fedoraproject.org/en-US/epel/)).
 
 ---
 
