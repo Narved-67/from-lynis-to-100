@@ -5,6 +5,31 @@
 - name: Audit final | Application des handlers en attente
   ansible.builtin.meta: flush_handlers
 
+- name: Audit final | resolv.conf.head créé par le rôle ?
+  ansible.builtin.stat:
+    path: /etc/resolv.conf.head
+  register: lynis100_resolv_head
+
+- name: Audit final | Serveurs DNS présents dans resolv.conf
+  ansible.builtin.command: grep -c '^nameserver' /etc/resolv.conf
+  register: lynis100_resolv_count
+  changed_when: false
+  failed_when: false
+  when: lynis100_resolv_head.stat.exists
+
+- name: "Audit final | resolv.conf réécrit par le DHCP : serveurs remis"
+  ansible.builtin.copy:
+    src: /etc/resolv.conf.head
+    dest: /etc/resolv.conf
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+    unsafe_writes: true
+  when:
+    - lynis100_resolv_head.stat.exists
+    - (lynis100_resolv_count.stdout | default('0') | int) < 2
+
 - name: Audit final | Lancement de Lynis (1 à 3 minutes)
   ansible.builtin.command: lynis audit system --quick --no-colors
   register: lynis100_audit_after

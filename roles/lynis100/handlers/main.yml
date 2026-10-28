@@ -33,11 +33,6 @@
   ansible.builtin.command: update-grub
   changed_when: true
 
-- name: Redémarrer dnsmasq
-  ansible.builtin.systemd:
-    name: dnsmasq
-    state: restarted
-
 - name: Recharger postfix
   ansible.builtin.systemd:
     name: postfix

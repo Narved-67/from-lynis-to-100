@@ -37,10 +37,10 @@ système**. Le play refuse de démarrer tant que vous n'avez pas confirmé avec
 | **Core dumps** | Désactivés | Plus de dump mémoire après un crash |
 | **GRUB** | Mot de passe pour modifier les entrées (démarrage normal libre) | Mot de passe **obligatoire** dans les variables |
 | **Modules noyau** | usb-storage, firewire, dccp, sctp, rds, tipc, cramfs, freevxfs, hfs, hfsplus, jffs2, udf, squashfs bloqués | Plus d'ISO en udf ; squashfs conservé si snapd est présent |
-| **DNS** | dnsmasq en résolveur local si un seul DNS est configuré | `/etc/resolv.conf` réécrit |
+| **DNS** | DNS actuel + **8.8.8.8 et 1.1.1.1** (`lynis100_dns_fallback_servers`), chacun testé avant d'être retenu ; persistant via `/etc/resolv.conf.head` (dhcpcd) ou `dhclient.conf` | `/etc/resolv.conf` réécrit ; les requêtes DNS peuvent partir vers Google/Cloudflare |
 | **Compilateurs** | gcc, g++, binutils supprimés après simulation apt | **rkhunter part avec binutils** (ClamAV le remplace). Suppression annulée si un autre paquet serait retiré |
 | **nginx** (si installé) | TLS 1.2/1.3, vhost HTTPS **auto-signé** sur 443 si aucun certificat | Remplacez le certificat |
-| **Paquets** | fail2ban, auditd, aide, clamav, usbguard, needrestart, debsums, sysstat, acct, unattended-upgrades, apt-listbugs, apt-listchanges, nftables, dnsmasq ; `apt upgrade` | ClamAV utilise environ 1 Go de RAM |
+| **Paquets** | fail2ban, auditd, aide, clamav, usbguard, needrestart, debsums, sysstat, acct, unattended-upgrades, apt-listbugs, apt-listchanges, nftables ; `apt upgrade` | ClamAV utilise environ 1 Go de RAM |
 
 > **Faites un snapshot avant de lancer.** En cas d'erreur, les étapes sensibles
 > (fstab, SSH, nginx, port SSH) se restaurent d'elles-mêmes, mais un snapshot
@@ -137,6 +137,7 @@ Toutes sont documentées dans [`roles/lynis100/defaults/main.yml`](roles/lynis10
 | `lynis100_remove_compilers` | `true` | Suppression des compilateurs |
 | `lynis100_home_lv_size` | vide | Crée un LV `/home` (ex : `2g`) si `/` est sur LVM |
 | `lynis100_upgrade_packages` | `true` | `apt upgrade` avant l'audit final |
+| `lynis100_dns_fallback_servers` | `[8.8.8.8, 1.1.1.1]` | DNS ajoutés pour NETW-2705 |
 | `lynis100_exceptions` | `true` | Écrit `/etc/lynis/custom.prf` |
 | `lynis100_fail_below_score` | `0` | Fait échouer le play sous ce score |
 | `lynis100_reboot` | `false` | Redémarre à la fin |
