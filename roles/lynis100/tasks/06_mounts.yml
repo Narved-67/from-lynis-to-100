@@ -127,10 +127,15 @@
         label: "{{ item.item }}"
       failed_when: false
 
-    - name: Montages | Non montés maintenant, actifs au prochain redémarrage
+    - name: Montages | Dans fstab mais pas encore montés (actifs au prochain redémarrage)
       ansible.builtin.debug:
-        msg: "Appliqué au redémarrage : {{ lynis100_active_mounts.results | rejectattr('rc', 'equalto', 0) | map(attribute='item') | join(', ') }}"
-      when: lynis100_active_mounts.results | rejectattr('rc', 'equalto', 0) | list | length > 0
+        msg: "Appliqué au redémarrage : {{ lynis100_pending_mounts | join(', ') }}"
+      vars:
+        lynis100_fstab_now: "{{ lynis100_fstab_entries.results | selectattr('rc', 'equalto', 0) | map(attribute='item') | list
+                               + (lynis100_mount_defaults.keys() | list) }}"
+        lynis100_pending_mounts: "{{ lynis100_active_mounts.results | rejectattr('rc', 'equalto', 0) | map(attribute='item')
+                                    | select('in', lynis100_fstab_now) | list }}"
+      when: lynis100_pending_mounts | length > 0
 
     - name: Montages | apt repasse /tmp en exec pendant les installations
       ansible.builtin.copy:
@@ -154,7 +159,7 @@
   rescue:
     - name: "Montages | Erreur : restauration de fstab depuis la sauvegarde"
       ansible.builtin.unarchive:
-        src: "{{ lynis100_backup_dir }}/{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+        src: "{{ lynis100_backup_dir }}/{{ ansible_facts.date_time.iso8601_basic_short }}.tar.gz"
         dest: /
         remote_src: true
         include: [etc/fstab]

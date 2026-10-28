@@ -7,12 +7,6 @@
   become: true
   gather_facts: false
   force_handlers: true
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-    APT_LISTBUGS_FRONTEND: none
-    APT_LISTCHANGES_FRONTEND: none
-    NEEDRESTART_MODE: a
-
   pre_tasks:
     - name: Python 3 présent sur la cible (requis par Ansible)
       ansible.builtin.raw: >-
@@ -26,3 +20,8 @@
 
   roles:
     - role: lynis100
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+        APT_LISTBUGS_FRONTEND: none
+        APT_LISTCHANGES_FRONTEND: none
+        NEEDRESTART_MODE: a

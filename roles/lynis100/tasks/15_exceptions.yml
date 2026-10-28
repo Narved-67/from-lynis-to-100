@@ -27,6 +27,13 @@
   changed_when: false
   failed_when: false
 
+- name: Exceptions | /home et /var séparés ? (FILE-6310)
+  ansible.builtin.command: findmnt -n {{ item }}
+  loop: [/home, /var]
+  register: lynis100_separate
+  changed_when: false
+  failed_when: false
+
 - name: Exceptions | Liste finale
   ansible.builtin.set_fact:
     lynis100_skip_tests_final: >-
@@ -34,7 +41,10 @@
          + ([{'id': 'DEB-0510', 'why': 'Disque systeme non chiffre (chiffrer = reinstaller)'}]
             if lynis100_root_crypt.rc != 0 else [])
          + ([{'id': 'DEB-0810', 'why': 'apt-listbugs absent des depots de cette distribution'}]
-            if 'install ok installed' not in lynis100_listbugs.stdout else []) }}
+            if 'install ok installed' not in lynis100_listbugs.stdout else [])
+         + ([{'id': 'FILE-6310', 'why': 'home et var sur la partition racine (repartitionner = reinstaller)'}]
+            if (lynis100_exception_unpartitioned | bool)
+               and (lynis100_separate.results | rejectattr('rc', 'equalto', 0) | list | length > 0) else []) }}
 
 - name: Exceptions | Contrôle ASCII des justifications
   ansible.builtin.assert:

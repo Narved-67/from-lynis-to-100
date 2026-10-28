@@ -164,7 +164,10 @@ lynis100_skip_tests:
   - {id: "TOOL-5002", why: "Gestion de configuration externe (Ansible)"}
   - {id: "KRNL-6000:kernel.modules_disabled", why: "1 empeche tout chargement de module"}
   - {id: "MALW-3280", why: "ClamAV actif mais ce test ne detecte que les antivirus commerciaux ou Wazuh"}
-# DEB-0510 est ajouté automatiquement si / n'est pas chiffré
+# DEB-0510 est ajouté automatiquement si / n'est pas chiffré.
+# FILE-6310 (1 point par dossier) : exception ajoutée si /home ou /var ne sont
+# pas des partitions séparées (les créer imposerait de repartitionner).
+lynis100_exception_unpartitioned: true
 
 # ------------------------------------------------------------------- Audit ---
 # Faire échouer le play si le score final est inférieur (0 = jamais)

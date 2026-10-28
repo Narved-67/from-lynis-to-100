@@ -118,7 +118,7 @@
 
     - name: nginx | Restauration de nginx.conf
       ansible.builtin.unarchive:
-        src: "{{ lynis100_backup_dir }}/{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+        src: "{{ lynis100_backup_dir }}/{{ ansible_facts.date_time.iso8601_basic_short }}.tar.gz"
         dest: /
         remote_src: true
         include: [etc/nginx/nginx.conf]

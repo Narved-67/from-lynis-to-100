@@ -126,7 +126,7 @@
   ansible.builtin.set_fact:
     lynis100_allow_users_final: >-
       {{ ((lynis100_ssh_allow_users if lynis100_ssh_allow_users | length > 0 else lynis100_humans | default([]))
-          + [ansible_user | default(ansible_env.SUDO_USER | default(''), true)]) | select | unique | list }}
+          + [ansible_user | default(ansible_facts.env.SUDO_USER | default(''), true)]) | select | unique | list }}
 
 - name: Préflight | L'utilisateur Ansible doit rester autorisé en SSH
   ansible.builtin.assert:
@@ -253,9 +253,9 @@
     cmd: |
       files=()
       for f in {{ lynis100_backup_paths | join(' ') }}; do [ -e "$f" ] && files+=("$f"); done
-      tar -czf {{ lynis100_backup_dir }}/{{ ansible_date_time.iso8601_basic_short }}.tar.gz "${files[@]}"
+      tar -czf {{ lynis100_backup_dir }}/{{ ansible_facts.date_time.iso8601_basic_short }}.tar.gz "${files[@]}"
     executable: /bin/bash
-    creates: "{{ lynis100_backup_dir }}/{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+    creates: "{{ lynis100_backup_dir }}/{{ ansible_facts.date_time.iso8601_basic_short }}.tar.gz"
   vars:
     lynis100_backup_paths:
       - /etc/login.defs
@@ -290,4 +290,4 @@
       - "AllowUsers   : {{ lynis100_allow_users_final | join(' ') }}"
       - "Pare-feu     : {{ 'ufw' if lynis100_use_ufw else 'nftables' }} {{ '(ignoré : Docker)' if lynis100_docker.stat.exists else '' }}"
       - "USB          : {{ 'désactivé' if lynis100_usb_allowed else 'non modifié' }}"
-      - "Sauvegarde   : {{ lynis100_backup_dir }}/{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+      - "Sauvegarde   : {{ lynis100_backup_dir }}/{{ ansible_facts.date_time.iso8601_basic_short }}.tar.gz"

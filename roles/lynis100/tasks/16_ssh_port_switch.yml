@@ -75,15 +75,17 @@
         host: 127.0.0.1
         timeout: 30
 
-    - name: Port SSH | Étape 2 - reconnexion d'Ansible sur le nouveau port
+    - name: Port SSH | Étape 2 - nouveau port pour la suite du play
+      ansible.builtin.set_fact:
+        ansible_port: "{{ lynis100_ssh_port | int }}"
+      when: not lynis100_is_local
+
+    - name: Port SSH | Fermeture de la connexion existante (sans effet en local)
+      ansible.builtin.meta: reset_connection
+
+    - name: Port SSH | Reconnexion d'Ansible sur le nouveau port
       when: not lynis100_is_local
       block:
-        - name: Port SSH | Nouveau port pour la suite du play
-          ansible.builtin.set_fact:
-            ansible_port: "{{ lynis100_ssh_port | int }}"
-
-        - name: Port SSH | Fermeture de la connexion existante
-          ansible.builtin.meta: reset_connection
 
         - name: Port SSH | Test de connexion
           ansible.builtin.wait_for_connection:

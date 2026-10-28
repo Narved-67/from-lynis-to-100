@@ -58,7 +58,7 @@ exécutez sur vos machines.
 
 | Cible | État |
 |---|---|
-| Debian 13 (trixie) | Procédure validée à **100** sur VM VMware (Lynis 3.1.4) ; rôle simulé ligne par ligne (voir [docs/VERIFICATION.md](docs/VERIFICATION.md)) |
+| Debian 13 (trixie) | Rôle **exécuté** sur VM VMware vierge (Debian 13.7, Lynis 3.1.4) : **63 → 99** au premier passage (seul FILE-6310 restait, désormais en exception) |
 | Ubuntu 24.04 LTS | Rôle **exécuté** en conteneur systemd : 62 → 94 (le reste n'est pas applicable en conteneur), idempotent, bascule SSH validée |
 | Debian 12, Ubuntu 22.04 | Supportés, non testés de bout en bout |
 | Conteneurs | Refusés (sauf `lynis100_allow_container=true`, réservé aux tests) |
@@ -77,7 +77,7 @@ exécutez sur vos machines.
 - Debian 12/13 ou Ubuntu 22.04/24.04 avec systemd, accès Internet aux dépôts apt
 - Un compte non-root accessible en SSH, avec `sudo` **ou** le mot de passe root (`su`)
 - 2 Go libres sur `/`
-- Pour 100 : installer Debian avec le partitionnement **« Partitions /home, /var et /tmp séparées »** (LVM conseillé). Lynis attribue 30 points à ces partitions séparées (FILE-6310)
+- Pour 100 : installer Debian avec le partitionnement **« Partitions /home, /var et /tmp séparées »** (LVM conseillé). Sinon, FILE-6310 (1 point par dossier non séparé) est ajouté en exception justifiée
 
 Python 3, `python3-apt`, Lynis, `dig`, `nft`, `ss`, `findmnt`, `openssl`,
 `grub-mkpasswd-pbkdf2` et tous les paquets de sécurité sont **installés par le
@@ -196,6 +196,7 @@ durcissement** : c'est un risque accepté, à justifier dans un compte rendu.
 | MALW-3280 | ClamAV est actif, mais ce test ne détecte que les antivirus commerciaux ou Wazuh |
 | DEB-0510 | **Si `/` n'est pas chiffré** : chiffrer imposerait une réinstallation |
 | DEB-0810 | **Si apt-listbugs n'existe pas** dans les dépôts (cas d'Ubuntu) |
+| FILE-6310 | **Si /home ou /var ne sont pas séparés** : repartitionner imposerait une réinstallation (`lynis100_exception_unpartitioned`) |
 
 ## Pièges connus (gérés par le rôle)
 

@@ -64,7 +64,7 @@ utilisateur `yd`, connexion Ansible `ansible_user=yd`, `become_method=su`.
 | 03 Comptes | `login.defs` : la regex ne touche que les lignes `CLÉ valeur`, pas les commentaires explicatifs | root et yd expirent à 90 jours |
 | 04 Core dumps | `limits.d`, `profile.d`, `coredump.conf(.d)` | — |
 | 05 sysctl | Chaque clé appliquée à chaud et persistée | `forwarding` laissé à 1 si Docker/routage |
-| 06 Montages | Options exigées par Lynis fusionnées dans fstab, sans changer la source (UUID conservé) | **Partitionnement conseillé : « /home, /var et /tmp séparés » avec LVM** (FILE-6310 : 30 points) |
+| 06 Montages | Options exigées par Lynis fusionnées dans fstab, sans changer la source (UUID conservé) | Partitionnement « /home, /var et /tmp séparés » conseillé ; sinon exception FILE-6310 (1 point par dossier) |
 | 07 SSH | `/run/sshd` créé, `sshd -t`, reload | Session ouverte conservée |
 | 08 nftables | Entrant bloqué sauf 22 + 2222 + services en écoute | fail2ban redémarré après `flush ruleset` |
 | 09 USB | VMware → USBGuard (règles vides) + bus désactivés | Clavier console VMware en PS/2 : non affecté |
@@ -75,3 +75,14 @@ utilisateur `yd`, connexion Ansible `ansible_user=yd`, `become_method=su`.
 | 15 Exceptions | apt-listbugs installé en dernier, `custom.prf` ASCII | DEB-0510 ajouté (disque non chiffré) |
 | 16 Port SSH | Écoute 22+2222 → reconnexion sur 2222 → retrait du 22 | **Mettre `ansible_port=2222` dans l'inventaire pour les exécutions suivantes** |
 | 17 Audit final | Score, tests incomplets, avertissements | Redémarrer ensuite |
+
+## Passe 4 — Exécution réelle sur Debian 13 vierge
+
+VM VMware, Debian 13.7 netinst, une seule partition, exécution en local
+(`ansible_connection=local`, `become_method=su`).
+
+| Résultat | Détail |
+|---|---|
+| ✅ **63 → 99**, 0 échec | 158 tâches, bascule SSH 22 → 2222 en local |
+| Seul test incomplet | FILE-6310 : /home et /var sur la racine (1 point chacun) → exception automatique ajoutée |
+| Corrections | Message « appliqué au redémarrage » erroné pour des dossiers non séparés ; avertissements `raw`/`environment` et `reset_connection`/`when` supprimés ; documentation : FILE-6310 vaut 1 point par dossier, pas 10 |
