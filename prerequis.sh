@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# from-lynis-to-100 : installation et vérification de TOUS les prérequis
+# from-lynis-to-100 : installation de TOUS les prérequis (étape 1 de lancer.sh)
 #
 # Part du principe que rien n'est installé. Le script :
 #   1. vérifie qu'il tourne en root et identifie la distribution
@@ -9,11 +9,12 @@
 #   4. si l'Ansible de la distribution est trop ancien (< 2.15), installe une
 #      version récente dans /opt/lynis100-ansible (environnement Python isolé)
 #   5. installe les collections Ansible si elles manquent ou sont trop anciennes
-#   6. télécharge (ou met à jour) le projet dans ~/from-lynis-to-100
-#   7. VÉRIFIE chaque prérequis et s'arrête (code 1) si un seul manque
+#   6. crée inventory.ini (cible : cette machine) ; télécharge le projet si le
+#      script est lancé seul, hors du dossier du projet
+# Il s'arrête (code 1) à la première erreur. La vérification des versions est
+# faite ensuite par verif_prerequis.sh.
 #
-# Le durcissement n'est lancé que si ce script réussit :
-#   bash prerequis.sh && cd ~/from-lynis-to-100 && ansible-playbook site.yml
+# Enchaînement complet : bash lancer.sh
 #
 # Seule partie en shell du projet : Ansible ne peut pas s'installer lui-même.
 # =============================================================================
@@ -23,7 +24,8 @@ set -euo pipefail
 {
 
 REPO_TGZ="https://github.com/Narved-67/from-lynis-to-100/archive/refs/heads/main.tar.gz"
-DEST="${LYNIS100_DIR:-$HOME/from-lynis-to-100}"
+ICI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$ICI/site.yml" ]; then DEST="$ICI"; else DEST="${LYNIS100_DIR:-$HOME/from-lynis-to-100}"; fi
 VENV=/opt/lynis100-ansible
 MIN_CORE="2.15"
 MIN_POSIX="1.5.0"
@@ -39,7 +41,7 @@ trap 'stop "Erreur inattendue ligne $LINENO (commande : $BASH_COMMAND)"' ERR
 version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]; }
 
 # --------------------------------------------------------------------------- 1
-etape "1/7 Contrôles de base"
+etape "1/6 Contrôles de base"
 [ "$(id -u)" -eq 0 ] || stop "À lancer en root : su -  (ou sudo -i), puis relancer"
 ok "root"
 [ -r /etc/os-release ] || stop "/etc/os-release introuvable : distribution inconnue"
@@ -56,7 +58,7 @@ command -v systemctl >/dev/null || stop "systemd est requis"
 ok "systemd"
 
 # --------------------------------------------------------------------------- 2
-etape "2/7 Dépôts de paquets"
+etape "2/6 Dépôts de paquets"
 if [ "$FAMILLE" = debian ] && [ "${ID:-}" = debian ]; then
   if grep -qs '^deb cdrom:' /etc/apt/sources.list; then
     sed -i 's/^deb cdrom:/# deb cdrom:/' /etc/apt/sources.list
@@ -90,7 +92,7 @@ esac
 ok "dépôts à jour"
 
 # --------------------------------------------------------------------------- 3
-etape "3/7 Paquets : curl, certificats, tar, gzip, Python 3, Ansible"
+etape "3/6 Paquets : curl, certificats, tar, gzip, Python 3, Ansible"
 case "$FAMILLE" in
   debian) DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
             ca-certificates curl tar gzip python3 python3-apt python3-venv ansible ;;
@@ -101,7 +103,7 @@ esac
 ok "paquets installés"
 
 # --------------------------------------------------------------------------- 4
-etape "4/7 Version d'Ansible (minimum ansible-core $MIN_CORE)"
+etape "4/6 Version d'Ansible (minimum ansible-core $MIN_CORE)"
 core_version() { ansible --version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1; }
 CORE="$(core_version || true)"
 if [ -z "$CORE" ] || ! version_ge "$CORE" "$MIN_CORE"; then
@@ -119,7 +121,7 @@ version_ge "${CORE:-0}" "$MIN_CORE" || stop "ansible-core ${CORE:-absent} < $MIN
 ok "ansible-core $CORE"
 
 # --------------------------------------------------------------------------- 5
-etape "5/7 Collections Ansible"
+etape "5/6 Collections Ansible"
 coll_version() {
   ansible-galaxy collection list "$1" 2>/dev/null | awk -v c="$1" '$1==c {print $2}' | sort -V | tail -n1
 }
@@ -138,41 +140,23 @@ ok "ansible.posix $POSIX"
 ok "community.general $GENERAL"
 
 # --------------------------------------------------------------------------- 6
-etape "6/7 Projet from-lynis-to-100 dans $DEST"
-mkdir -p "$DEST"
-curl -fsSL "$REPO_TGZ" | tar xz --strip-components=1 -C "$DEST" \
-  || stop "Téléchargement du projet impossible (accès à github.com ?)"
+etape "6/6 Projet from-lynis-to-100 dans $DEST"
+if [ ! -f "$DEST/site.yml" ]; then
+  mkdir -p "$DEST"
+  curl -fsSL "$REPO_TGZ" | tar xz --strip-components=1 -C "$DEST" \
+    || stop "Téléchargement du projet impossible (accès à github.com ?)"
+  ok "projet téléchargé"
+else
+  ok "projet présent"
+fi
 if [ ! -f "$DEST/inventory.ini" ]; then
   printf '[lynis_targets]\nlocalhost ansible_connection=local ansible_become_method=su\n' > "$DEST/inventory.ini"
   ok "inventory.ini créé (cible : cette machine)"
 else
   ok "inventory.ini existant conservé"
 fi
-ok "projet à jour"
 
-# --------------------------------------------------------------------------- 7
-etape "7/7 Vérification finale"
 trap - ERR
-MANQUE=0
-for c in curl tar gzip python3 ansible ansible-playbook ansible-galaxy systemctl; do
-  if command -v "$c" >/dev/null; then ok "$c"; else ko "$c manquant"; MANQUE=1; fi
-done
-if [ "$FAMILLE" = debian ]; then
-  # Python système (celui qu'Ansible utilise sur la cible), pas un éventuel Python local
-  PYSYS=/usr/bin/python3; [ -x "$PYSYS" ] || PYSYS=python3
-  if "$PYSYS" -c 'import apt' 2>/dev/null; then ok "python3-apt"; else ko "python3-apt manquant"; MANQUE=1; fi
-fi
-for f in site.yml questions.yml ansible.cfg inventory.ini roles/lynis100/tasks/main.yml callback_plugins/lynis100_tui.py; do
-  if [ -f "$DEST/$f" ]; then ok "$f"; else ko "$f manquant"; MANQUE=1; fi
-done
-if (cd "$DEST" && ansible-playbook --syntax-check site.yml >/dev/null 2>&1); then
-  ok "playbook valide (syntax-check)"
-else
-  ko "syntax-check du playbook en échec"; MANQUE=1
-fi
-[ "$MANQUE" -eq 0 ] || stop "Un ou plusieurs prérequis manquent (voir ci-dessus)"
-
-printf '\n\033[1;32mTous les prérequis sont installés et vérifiés.\033[0m\n'
-printf 'Suite : cd %s && ansible-playbook site.yml\n' "$DEST"
+printf '\n\033[1;32mPrérequis installés.\033[0m Vérification : bash %s/verif_prerequis.sh\n' "$DEST"
 exit 0
 }

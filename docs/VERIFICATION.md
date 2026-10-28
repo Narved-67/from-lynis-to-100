@@ -112,3 +112,13 @@ inférieur ; ligne du journal en double après un échec ignoré → ordre corri
 | Lancement sans être root | ✅ arrêt immédiat, code 1 |
 | Installation d'Ansible récent dans `/opt/lynis100-ansible` (distribution trop ancienne) | ⚠️ non exécutée (pas de Debian 12 / Ubuntu 22.04 de test) |
 | Préflight du rôle : commandes requises vérifiées avant modification | ✅ lint + syntaxe ; à confirmer sur VM |
+
+## Passe 7 — Lanceur en 3 étapes, DNS secondaire optionnel, « À faire à la main »
+
+| Contrôle | Résultat |
+|---|---|
+| `shellcheck` des 3 scripts | ✅ |
+| `lancer.sh` réel (Ubuntu 24.04, projet décompressé sans `inventory.ini`) | ✅ prérequis → vérification `--version` → Ansible (`--syntax-check` transmis) |
+| `verif_prerequis.sh` avec un fichier du projet supprimé | ✅ 3 échecs listés, code 1, Ansible non lancé |
+| DNS : secondaire `n` / adresse / vide, primaire vide ou non (4 cas) | ✅ un seul amont si refusé, sinon liste complète avec secours |
+| Récapitulatif : échec + test Lynis + avertissement simulés | ✅ section « À faire à la main » avec `--tags`, `lynis show details`, lien CISOfy |

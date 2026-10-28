@@ -135,7 +135,7 @@
 
     - name: Questions | DNS secondaire
       ansible.builtin.pause:
-        prompt: "Serveur DNS secondaire (Entrée = détection automatique, ex. 1.1.1.1)"
+        prompt: "Serveur DNS secondaire (Entrée = détection automatique, n = pas de second DNS, ex. 1.1.1.1)"
       register: lynis100_q_dns2
 
     - name: Questions | Réponses
@@ -151,7 +151,9 @@
           remove_compilers: "{{ (lynis100_q_compilers.user_input | lower) == 'y' }}"
           grub_protect: "{{ (lynis100_q_grub.user_input | lower) == 'y' }}"
           dns_primary: "{{ lynis100_q_dns1.user_input | trim }}"
-          dns_secondary: "{{ lynis100_q_dns2.user_input | trim }}"
+          dns_secondary: >-
+            {{ 'none' if (lynis100_q_dns2.user_input | trim | lower) in ['n', 'non', 'no', 'aucun', 'none']
+               else (lynis100_q_dns2.user_input | trim) }}
 
     - name: Questions | Mémorisation (sans mot de passe)
       ansible.builtin.copy:
@@ -169,7 +171,7 @@
   ansible.builtin.assert:
     that: >-
       lynis100_answers[item] | default('') | length == 0
-      or lynis100_answers[item] is match('^[0-9a-fA-F:.]+$')
+      or lynis100_answers[item] is match('^([0-9a-fA-F:.]+|none)$')
     fail_msg: "Adresse DNS invalide ({{ item }}) : {{ lynis100_answers[item] | default('') }}. Relancez avec -e lynis100_reask=true"
     quiet: true
   loop: [dns_primary, dns_secondary]

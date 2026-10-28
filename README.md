@@ -19,44 +19,44 @@ puis relance l'audit et affiche le score avec les tests encore incomplets.
 
 ## ⚡ Fast use (machine vierge)
 
-Le projet part du principe que **rien n'est installé**. Le script
-[`prerequis.sh`](prerequis.sh) installe et **vérifie** tous les prérequis
-(Ansible, collections, Python, curl...) ; s'il en manque un seul, il s'arrête
-et **le durcissement n'est pas lancé**.
+Rien n'est supposé installé. **curl** est l'outil de téléchargement le plus
+transverse (présent d'origine sur Fedora, RHEL, Arch et Ubuntu, installable en
+une commande sur Debian).
 
 ```bash
 # 0. Passer root
 su -        # Debian (mot de passe root) — ou : sudo -i (Ubuntu, Fedora, RHEL, Arch)
 
-# 1. Installer curl, le seul outil nécessaire pour télécharger le script
-if command -v apt-get >/dev/null; then apt-get update && apt-get install -y curl ca-certificates
-elif command -v dnf >/dev/null;   then dnf install -y curl
-elif command -v pacman >/dev/null; then pacman -Sy --noconfirm --needed curl
+# 1. curl (téléchargement) + tar et gzip (décompression du .tar.gz)
+if   command -v apt-get >/dev/null; then apt-get update -q && apt-get install -y curl tar gzip ca-certificates
+elif command -v dnf     >/dev/null; then dnf install -y curl tar gzip
+elif command -v pacman  >/dev/null; then pacman -Sy --noconfirm --needed curl tar gzip
 fi
 
-# 2. Télécharger le script des prérequis (et le lire avant, si vous voulez)
-curl -fsSL https://raw.githubusercontent.com/Narved-67/from-lynis-to-100/main/prerequis.sh -o prerequis.sh
-less prerequis.sh
+# 2. Télécharger et décompresser le projet (git inutile)
+mkdir -p ~/from-lynis-to-100
+curl -fsSL https://github.com/Narved-67/from-lynis-to-100/archive/refs/heads/main.tar.gz \
+  | tar xz --strip-components=1 -C ~/from-lynis-to-100
 
-# 3. Prérequis, puis durcissement SEULEMENT si tous les prérequis sont validés
-bash prerequis.sh && cd ~/from-lynis-to-100 && ansible-playbook site.yml
+# 3. Prérequis → vérification (--version) → Ansible → récapitulatif
+bash ~/from-lynis-to-100/lancer.sh
 ```
 
-| Étape de `prerequis.sh` | Ce qui est fait | Arrêt si |
-|---|---|---|
-| 1. Contrôles de base | root, distribution, systemd | pas root, apt/dnf/pacman absent, pas de systemd |
-| 2. Dépôts | Debian installée sans réseau : source cdrom désactivée, `deb.debian.org` ajouté ; EPEL + CRB (Rocky, Alma, RHEL) ; mise à jour des index | dépôts injoignables |
-| 3. Paquets | ca-certificates, curl, tar, gzip, python3, python3-apt, python3-venv, ansible | installation en échec |
-| 4. Version d'Ansible | ansible-core ≥ 2.15 ; sinon version récente dans `/opt/lynis100-ansible` (Debian 12, Ubuntu 22.04) | version toujours trop ancienne |
-| 5. Collections | ansible.posix ≥ 1.5, community.general ≥ 8 (installées si absentes ou anciennes) | galaxy injoignable |
-| 6. Projet | archive GitHub dans `~/from-lynis-to-100`, `inventory.ini` créé (conservé s'il existe) | github.com injoignable |
-| 7. Vérification finale | chaque commande, python3-apt, fichiers du projet, `--syntax-check` du playbook | un seul élément manquant |
+`lancer.sh` enchaîne trois étapes ; **chacune ne démarre que si la précédente a réussi** :
 
-Le playbook revérifie ensuite ses propres outils (Lynis, `ss`, `dig`, `openssl`,
-`sshd`, `grub-mkpasswd`...) et ses paquets de sécurité **avant toute
-modification** : s'il en manque un, il s'arrête sans rien changer.
+| Étape | Script | Ce qui est fait | Si ça échoue |
+|---|---|---|---|
+| 1 | [`prerequis.sh`](prerequis.sh) | Dépôts (Debian sans réseau corrigée, EPEL), python3, python3-apt, python3-venv, Ansible ≥ 2.15 (version récente dans `/opt/lynis100-ansible` si la distribution est trop ancienne), collections, `inventory.ini` | Arrêt, rien n'est durci |
+| 2 | [`verif_prerequis.sh`](verif_prerequis.sh) | `--version` de curl, tar, gzip, python3, systemd, ansible, ansible-playbook, ansible-galaxy, python3-apt ; versions minimales ; fichiers du projet ; `--syntax-check` | Liste des prérequis en échec, Ansible n'est pas lancé |
+| 3 | `ansible-playbook site.yml` | Questionnaire, durcissement, **récapitulatif final** | — |
 
-Pour relancer plus tard : `bash ~/from-lynis-to-100/prerequis.sh && cd ~/from-lynis-to-100 && ansible-playbook site.yml`
+Le récapitulatif final liste ce qui n'a pas fonctionné et une section
+**« À faire à la main »** : pour chaque échec, la commande pour rejouer l'étape
+(`--tags`) une fois corrigée ; pour chaque test Lynis non validé, la commande
+`lynis show details <TEST>` et la page CISOfy du test.
+
+Pour relancer plus tard : `bash ~/from-lynis-to-100/lancer.sh` (les options
+sont transmises à Ansible, ex. `bash lancer.sh -e lynis100_reask=true`).
 
 ---
 
@@ -114,8 +114,8 @@ exécutez sur vos machines.
 
 ## Prérequis
 
-**Exécution locale (Fast use)** : rien à installer à la main, `prerequis.sh`
-installe et vérifie tout (voir plus haut).
+**Exécution locale (Fast use)** : rien à installer à la main, `lancer.sh`
+installe (`prerequis.sh`) puis vérifie (`verif_prerequis.sh`) tout (voir plus haut).
 
 **Exécution à distance (poste de contrôle → cible)**
 
@@ -131,7 +131,7 @@ installe et vérifie tout (voir plus haut).
 - 2 Go libres sur `/`
 - Pour 100 : installer Debian avec le partitionnement **« Partitions /home, /var et /tmp séparées »** (LVM conseillé). Sinon, FILE-6310 (1 point par dossier non séparé) est ajouté en exception justifiée
 
-Ordre de sécurité : `prerequis.sh` (arrêt si un prérequis manque) → préflight
+Ordre de sécurité : `prerequis.sh` (arrêt à la 1re erreur) → `verif_prerequis.sh` (arrêt si un prérequis manque) → préflight
 du rôle (outils : Lynis, `ss`, `dig`, `openssl`, `sshd`, `grub-mkpasswd`… installés
 puis vérifiés, arrêt si l'un manque) → paquets de sécurité (arrêt si l'un n'a pas
 pu être installé, sauf `-e lynis100_allow_missing_packages=true`) → durcissement.
@@ -152,7 +152,7 @@ ansible-playbook site.yml --ask-become-pass
 Le questionnaire demande : snapshot (obligatoire), port SSH 22 → 2222,
 restriction SSH (root refusé), pare-feu, USB, montages `noexec`, déconnexion
 après 15 min, expiration des mots de passe, retrait des compilateurs, mot de
-passe GRUB (saisi masqué, **jamais enregistré**), DNS primaire et secondaire.
+passe GRUB (saisi masqué, **jamais enregistré**), DNS primaire et secondaire (répondre `n` au secondaire pour n'en mettre qu'un seul : aucun serveur de secours n'est alors ajouté).
 Les réponses sont mémorisées dans `lynis100_answers.yml` (ignoré par git) et
 proposées à l'exécution suivante.
 

@@ -170,6 +170,7 @@ lynis100_dns_servers:
 # DNS primaire / secondaire fournis au questionnaire (prioritaires sur le DHCP)
 lynis100_dns_primary: ""
 lynis100_dns_secondary: ""
+# "none" : pas de second DNS (un seul serveur amont, aucun secours automatique)
 
 # ------------------------------------------------------------- Exceptions ---
 lynis100_exceptions: true

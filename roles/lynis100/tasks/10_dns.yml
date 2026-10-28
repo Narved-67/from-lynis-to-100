@@ -27,13 +27,18 @@
       register: lynis100_resolv_raw
 
     - name: DNS | Serveurs amont (questionnaire, DHCP, passerelle, puis lynis100_dns_servers)
-      ansible.builtin.set_fact:
-        lynis100_dns_upstream: >-
-          {{ (([lynis100_dns_primary, lynis100_dns_secondary] | select | list)
+      vars:
+        lynis100_dns_single: "{{ lynis100_dns_secondary | string | lower in ['none', 'aucun', 'n', 'non'] }}"
+        lynis100_dns_second: "{{ '' if lynis100_dns_single | bool else lynis100_dns_secondary }}"
+        lynis100_dns_all: >-
+          {{ (([lynis100_dns_primary, lynis100_dns_second] | select | list)
               + (lynis100_resolv_raw.content | b64decode | regex_findall('(?m)^\s*nameserver\s+(\S+)')
                  | reject('match', '^(127[.]|::1$)') | reject('in', lynis100_dns_servers) | list)
               + ([ansible_facts.default_ipv4.gateway | default('')] | select | list)
               + lynis100_dns_servers) | unique | list }}
+      ansible.builtin.set_fact:
+        # Second DNS refusé au questionnaire : un seul serveur amont, sans secours automatique
+        lynis100_dns_upstream: "{{ lynis100_dns_all[:1] if lynis100_dns_single | bool else lynis100_dns_all }}"
 
     - name: DNS | dnsmasq
       ansible.builtin.package:

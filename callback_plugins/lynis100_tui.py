@@ -48,6 +48,16 @@ PHASES = {
     "17_final_audit.yml": ("Audit final", "score Lynis d'arrivée"),
     "main.yml": ("Handlers", "redémarrage des services modifiés"),
 }
+# Fichier de tâches -> tag pour rejouer l'étape seule après une correction manuelle
+TAGS = {
+    "02_packages.yml": "packages", "03_accounts.yml": "accounts", "04_shell_coredump.yml": "shell",
+    "05_kernel.yml": "kernel", "06_mounts.yml": "mounts", "07_ssh_fail2ban.yml": "ssh",
+    "08_firewall.yml": "firewall", "09_usb.yml": "usb", "10_dns.yml": "dns",
+    "11_audit_integrity.yml": "integrity", "12_updates_banners_grub.yml": "grub",
+    "13_nginx.yml": "nginx", "14_compilers.yml": "compilers", "15_exceptions.yml": "exceptions",
+    "16_ssh_port_switch.yml": "ssh", "01_baseline.yml": "audit", "17_final_audit.yml": "audit",
+}
+TEST_ID = re.compile(r"\b([A-Z]{2,5}-[0-9]{4})\b")
 SHELL_MODULES = {"command", "shell", "raw", "script", "ansible.builtin.command",
                  "ansible.builtin.shell", "ansible.builtin.raw", "ansible.builtin.script"}
 FOOTER = 7
@@ -89,6 +99,7 @@ class CallbackModule(CallbackBase):
         self.task_start = time.time()
         self.counts = {"ok": 0, "changed": 0, "skipped": 0, "failed": 0}
         self.failures = []
+        self.fail_phases = []
         self.nonzero = []
         self.score_before = None
         self.score_after = None
@@ -196,7 +207,7 @@ class CallbackModule(CallbackBase):
     def log(self, text, color=""):
         with self.lock:
             cols, _ = self._size()
-            line = self._fit(text, cols)
+            line = self._fit(text, cols) if self.region else text
             if not self.tty:
                 line = ANSI.sub("", line)
                 color = ""
@@ -334,6 +345,7 @@ class CallbackModule(CallbackBase):
         else:
             self.counts["failed"] += 1
             self.failures.append("%s : %s" % (name, msg))
+            self.fail_phases.append(self.phase_key)
             if self.phase_key:
                 self.phase_state[self.phase_key] = "fail"
             self.log("  ✖ %s : %s" % (name, msg), C["r"] + C["b"])
@@ -418,6 +430,26 @@ class CallbackModule(CallbackBase):
                 p("   - " + f, C["y"])
         if self.nonzero:
             p(" ℹ Commandes sh avec code non nul, sans conséquence (vérifications) : %d" % len(self.nonzero), C["d"])
+        # Ce que la personne devra sans doute faire à la main
+        todo = []
+        for f, ph in zip(self.failures, self.fail_phases):
+            tag = TAGS.get(ph)
+            todo.append(("Corriger : " + f,
+                         "ansible-playbook site.yml --tags " + tag if tag else "ansible-playbook site.yml"))
+        ids = []
+        for t in self.partial + self.warnings:
+            for i in TEST_ID.findall(t):
+                if i not in ids:
+                    ids.append(i)
+        for i in ids:
+            todo.append(("%s : lynis show details %s" % (i, i), "https://cisofy.com/lynis/controls/%s/" % i))
+        if todo:
+            p("")
+            p(" ✍ À faire à la main :", C["b"])
+            for n, (t, aide) in enumerate(todo, 1):
+                p("   %d. %s" % (n, t))
+                p("      → " + aide, C["d"])
+            p("   Puis vérifier : lynis audit system --quick", C["d"])
         p("")
         for h in sorted(stats.processed.keys()):
             s = stats.summarize(h)
