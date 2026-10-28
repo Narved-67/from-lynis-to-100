@@ -4,3 +4,4 @@ group_vars/*/
 !group_vars/*.yml.example
 *.retry
 .vault_pass*
+.ansible/
