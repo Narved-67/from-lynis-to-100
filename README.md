@@ -19,23 +19,40 @@ puis relance l'audit et affiche le score avec les tests encore incomplets.
 
 ## ⚡ Fast use
 
-Sur la machine à durcir (installation de git + Ansible, téléchargement, lancement
-en local). Le playbook pose ensuite ses questions.
+À lancer **sur la machine à durcir**, étape par étape. Rien n'est modifié avant
+l'étape 5, qui commence par le questionnaire (snapshot, port SSH, DNS...).
 
-**Debian avec mot de passe root (`su`)** :
+**1. Installer git et Ansible** (la ligne de votre distribution)
+
+| Distribution | Commande |
+|---|---|
+| Debian (mot de passe root) | `su -c "apt-get update && apt-get install -y git ansible"` |
+| Ubuntu | `sudo apt-get update && sudo apt-get install -y git ansible` |
+| Fedora / RHEL / Rocky / Alma | `sudo dnf install -y git ansible-core` |
+| Arch | `sudo pacman -Sy --needed git ansible` |
+
+**2 à 5. Télécharger, préparer, lancer**
 
 ```bash
-su -c 'if command -v apt-get >/dev/null; then apt-get update && apt-get install -y git ansible; elif command -v dnf >/dev/null; then dnf -y install git ansible-core; elif command -v pacman >/dev/null; then pacman -Sy --noconfirm --needed git ansible; fi' && { git clone https://github.com/Narved-67/from-lynis-to-100.git ~/from-lynis-to-100 2>/dev/null || git -C ~/from-lynis-to-100 pull; } && cd ~/from-lynis-to-100 && ansible-galaxy collection install -r requirements.yml && printf '[lynis_targets]\nlocalhost ansible_connection=local ansible_become_method=su\n' > inventory.ini && ansible-playbook site.yml -K
+# 2. Télécharger le dépôt (ou le mettre à jour s'il est déjà là)
+git clone https://github.com/Narved-67/from-lynis-to-100.git ~/from-lynis-to-100 \
+  || git -C ~/from-lynis-to-100 pull
+cd ~/from-lynis-to-100
+
+# 3. Installer les collections Ansible utilisées par le rôle
+ansible-galaxy collection install -r requirements.yml
+
+# 4. Cible = cette machine. Remplacer "su" par "sudo" si vous utilisez sudo
+cat > inventory.ini <<'EOF'
+[lynis_targets]
+localhost ansible_connection=local ansible_become_method=su
+EOF
+
+# 5. Lancer : questions, puis durcissement (-K demande le mot de passe root ou sudo)
+ansible-playbook site.yml -K
 ```
 
-**Ubuntu / Fedora / RHEL / Arch avec `sudo`** :
-
-```bash
-sudo sh -c 'if command -v apt-get >/dev/null; then apt-get update && apt-get install -y git ansible; elif command -v dnf >/dev/null; then dnf -y install git ansible-core; elif command -v pacman >/dev/null; then pacman -Sy --noconfirm --needed git ansible; fi' && { git clone https://github.com/Narved-67/from-lynis-to-100.git ~/from-lynis-to-100 2>/dev/null || git -C ~/from-lynis-to-100 pull; } && cd ~/from-lynis-to-100 && ansible-galaxy collection install -r requirements.yml && printf '[lynis_targets]\nlocalhost ansible_connection=local ansible_become_method=sudo\n' > inventory.ini && ansible-playbook site.yml -K
-```
-
-`-K` demande le mot de passe root (`su`) ou celui de votre compte (`sudo`).
-Relancer la même commande met le dépôt à jour et réexécute le playbook.
+Pour relancer plus tard : `cd ~/from-lynis-to-100 && git pull && ansible-playbook site.yml -K`
 
 ---
 
