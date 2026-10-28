@@ -1,0 +1,41 @@
+---
+# Famille Debian : Debian, Ubuntu
+lynis100_family_packages:
+  - libpam-tmpdir
+  - needrestart
+  - fail2ban
+  - python3-systemd
+  - libpam-passwdqc
+  - debsums
+  - apt-show-versions
+  - unattended-upgrades
+  - apt-listchanges
+  - acct
+  - sysstat
+  - auditd
+  - aide
+  - aide-common
+  - clamav
+  - clamav-daemon
+  - clamav-freshclam
+  - usbguard
+  - e2fsprogs
+lynis100_base_tools: [iproute2, util-linux, procps, openssl, grub-common, openssh-server, python3-apt, bind9-dnsutils]
+lynis100_lynis_pkg: lynis
+lynis100_rkhunter_pkg: rkhunter
+lynis100_nftables_pkg: nftables
+lynis100_dnsmasq_pkg: dnsmasq
+lynis100_ssh_service: ssh
+lynis100_sshd_bin: /usr/sbin/sshd
+lynis100_acct_service: acct
+lynis100_clamav_services: [clamav-freshclam, clamav-daemon]
+lynis100_aide_conf: /etc/aide/aide.conf
+lynis100_aide_db: /var/lib/aide/aide.db
+lynis100_aide_init_cmd: [aideinit, -y, -f]
+lynis100_aide_new_db: ""
+lynis100_grub_mkpasswd: grub-mkpasswd-pbkdf2
+lynis100_grub_mode: grub.d          # grub.d (40_custom + mkconfig) ou user.cfg (RHEL)
+lynis100_grub_cfg: /boot/grub/grub.cfg
+lynis100_grub_update_cmd: [update-grub]
+lynis100_auto_updates: unattended-upgrades
+lynis100_nft_conf: /etc/nftables.conf

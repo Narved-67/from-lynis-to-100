@@ -17,7 +17,7 @@
     regexp: '^Include\s+/etc/ssh/sshd_config\.d/\*\.conf'
     line: Include /etc/ssh/sshd_config.d/*.conf
     insertbefore: BOF
-    validate: /usr/sbin/sshd -t -f %s
+    validate: "{{ lynis100_sshd_bin }} -t -f %s"
 
 - name: SSH | Durcissement (drop-in) avec contrôle et retour arrière
   block:
@@ -31,7 +31,7 @@
       notify: Recharger sshd
 
     - name: SSH | Validation de la configuration complète
-      ansible.builtin.command: /usr/sbin/sshd -t
+      ansible.builtin.command: "{{ lynis100_sshd_bin }} -t"
       changed_when: false
 
     - name: SSH | Rechargement de sshd si modifié (les sessions ouvertes sont conservées)

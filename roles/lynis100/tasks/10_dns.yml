@@ -26,20 +26,47 @@
         src: /etc/resolv.conf
       register: lynis100_resolv_raw
 
-    - name: DNS | Serveurs amont (DHCP + passerelle, puis lynis100_dns_servers)
+    - name: DNS | Serveurs amont (questionnaire, DHCP, passerelle, puis lynis100_dns_servers)
       ansible.builtin.set_fact:
         lynis100_dns_upstream: >-
-          {{ ((lynis100_resolv_raw.content | b64decode | regex_findall('(?m)^\s*nameserver\s+(\S+)')
-               | reject('match', '^(127[.]|::1$)') | reject('in', lynis100_dns_servers) | list)
+          {{ (([lynis100_dns_primary, lynis100_dns_secondary] | select | list)
+              + (lynis100_resolv_raw.content | b64decode | regex_findall('(?m)^\s*nameserver\s+(\S+)')
+                 | reject('match', '^(127[.]|::1$)') | reject('in', lynis100_dns_servers) | list)
               + ([ansible_facts.default_ipv4.gateway | default('')] | select | list)
               + lynis100_dns_servers) | unique | list }}
 
     - name: DNS | dnsmasq
-      ansible.builtin.apt:
-        name: dnsmasq
+      ansible.builtin.package:
+        name: "{{ lynis100_dnsmasq_pkg }}"
         state: present
-        install_recommends: false
-        lock_timeout: 300
+
+    - name: DNS | dnsmasq lit /etc/dnsmasq.d (Arch ne l'active pas par défaut)
+      ansible.builtin.lineinfile:
+        path: /etc/dnsmasq.conf
+        regexp: '^#?conf-dir=/etc/dnsmasq.d/?,\*\.conf'
+        line: conf-dir=/etc/dnsmasq.d/,*.conf
+      when: ansible_facts.os_family == 'Archlinux'
+      notify: Redémarrer dnsmasq
+
+    - name: DNS | Dossier /etc/dnsmasq.d
+      ansible.builtin.file:
+        path: /etc/dnsmasq.d
+        state: directory
+        mode: "0755"
+
+    - name: DNS | NetworkManager ne réécrit plus resolv.conf
+      ansible.builtin.copy:
+        dest: /etc/NetworkManager/conf.d/99-lynis-to-100.conf
+        content: |
+          # from-lynis-to-100 (NETW-2705) : resolv.conf géré par le rôle (dnsmasq local)
+          [main]
+          dns=none
+          rc-manager=unmanaged
+        owner: root
+        group: root
+        mode: "0644"
+      when: lynis100_networkmanager
+      notify: Recharger NetworkManager
 
     - name: DNS | dnsmasq écoute uniquement sur 127.0.0.1
       ansible.builtin.template:

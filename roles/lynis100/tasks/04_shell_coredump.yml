@@ -14,6 +14,7 @@
     owner: root
     group: root
     mode: "0644"
+  when: lynis100_tmout_enabled | bool
 
 - name: Core dumps | ulimit -c 0 (Lynis lit /etc/profile.d/*.sh)
   ansible.builtin.copy:

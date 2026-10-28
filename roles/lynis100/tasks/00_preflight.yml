@@ -1,14 +1,14 @@
 ---
 # =============================================================================
 # 00 - Préflight : tout ce qui peut empêcher le rôle de réussir est vérifié
-#      AVANT la moindre modification.
+#      AVANT la moindre modification de configuration.
 # =============================================================================
-- name: Préflight | Le disclaimer a été lu et un snapshot existe
+- name: Préflight | Confirmation du disclaimer et du snapshot
   ansible.builtin.assert:
     that: lynis100_i_have_a_snapshot | bool
     fail_msg: >-
-      Lisez le disclaimer du README, faites un snapshot/une sauvegarde, puis
-      relancez avec -e lynis100_i_have_a_snapshot=true
+      Répondez « y » à la question du snapshot au lancement, ou passez
+      -e lynis100_i_have_a_snapshot=true après avoir lu le README.
     quiet: true
 
 - name: Préflight | Privilèges root (become)
@@ -17,17 +17,16 @@
     fail_msg: "Le rôle doit s'exécuter en root : ajoutez 'become: true' au play ou -b."
     quiet: true
 
-- name: Préflight | Distribution supportée
+- name: Préflight | Famille de distribution supportée
   ansible.builtin.assert:
-    that:
-      - ansible_facts.distribution in ['Debian', 'Ubuntu']
-      - >-
-        (ansible_facts.distribution == 'Debian' and ansible_facts.distribution_major_version in ['12', '13'])
-        or (ansible_facts.distribution == 'Ubuntu' and ansible_facts.distribution_version in ['22.04', '24.04'])
+    that: ansible_facts.os_family in ['Debian', 'RedHat', 'Archlinux']
     fail_msg: >-
-      Système non supporté : {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}.
-      Supportés : Debian 12/13, Ubuntu 22.04/24.04.
+      {{ ansible_facts.distribution }} ({{ ansible_facts.os_family }}) n'est pas supporté.
+      Familles supportées : Debian/Ubuntu, RedHat/Fedora/Rocky/Alma, Arch Linux.
     quiet: true
+
+- name: Préflight | Variables propres à la distribution
+  ansible.builtin.include_vars: "{{ ansible_facts.os_family }}.yml"
 
 - name: Préflight | systemd est le gestionnaire de services
   ansible.builtin.assert:
@@ -35,7 +34,7 @@
     fail_msg: "systemd est requis (service_mgr={{ ansible_facts.service_mgr }})."
     quiet: true
 
-- name: Préflight | Faits de virtualisation (facts Ansible, sans commande)
+- name: Préflight | Faits de virtualisation
   ansible.builtin.set_fact:
     lynis100_in_container: >-
       {{ ansible_facts.virtualization_role | default('') == 'guest'
@@ -51,15 +50,12 @@
     fail_msg: "Conteneur détecté ({{ lynis100_virt }}) : ce rôle vise une VM ou un serveur."
     quiet: true
 
-- name: Préflight | Espace disque libre sur /
-  ansible.builtin.command: df --output=avail -BM /
-  register: lynis100_df
-  changed_when: false
-
 - name: Préflight | Espace libre suffisant sur /
   ansible.builtin.assert:
-    that: (lynis100_df.stdout_lines[-1] | regex_replace('[^0-9]', '') | int) >= (lynis100_min_free_mb | int)
-    fail_msg: "Seulement {{ lynis100_df.stdout_lines[-1] | trim }} libres sur / : il faut {{ lynis100_min_free_mb }} Mo."
+    that: >-
+      (ansible_facts.mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first | default(10 ** 12) | int)
+      >= (lynis100_min_free_mb | int) * 1048576
+    fail_msg: "Moins de {{ lynis100_min_free_mb }} Mo libres sur / : libérez de l'espace."
     quiet: true
 
 - name: Préflight | Port SSH cible valide
@@ -70,22 +66,76 @@
     fail_msg: "lynis100_ssh_port invalide : {{ lynis100_ssh_port }}"
     quiet: true
 
-- name: Préflight | Ports TCP en écoute (module listen_ports_facts)
+# ----------------------------------------------------------- Gestionnaire de paquets
+- name: Préflight | Cache apt (Debian/Ubuntu)
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 600
+    lock_timeout: 300
+  register: lynis100_apt_update
+  retries: 3
+  delay: 10
+  until: lynis100_apt_update is succeeded
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Préflight | Dépôt universe actif (Ubuntu)
+  ansible.builtin.command: apt-cache policy fail2ban
+  register: lynis100_universe
+  changed_when: false
+  when: ansible_facts.distribution == 'Ubuntu'
+  failed_when: "'Candidate: (none)' in lynis100_universe.stdout or lynis100_universe.stdout == ''"
+  environment:
+    LC_ALL: C
+
+- name: "Préflight | Dépôts EPEL (RHEL, Rocky, Alma, CentOS : fail2ban, lynis, clamav...)"
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution != 'Fedora'
+  block:
+    - name: Préflight | Dépôt CRB (dépendances d'EPEL)
+      community.general.dnf_config_manager:
+        name: crb
+        state: enabled
+      failed_when: false
+
+    - name: Préflight | epel-release
+      ansible.builtin.dnf:
+        name: >-
+          {{ 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-' ~ ansible_facts.distribution_major_version ~ '.noarch.rpm'
+             if ansible_facts.distribution == 'RedHat' else 'epel-release' }}
+        state: present
+        disable_gpg_check: "{{ ansible_facts.distribution == 'RedHat' }}"
+
+- name: Préflight | Synchronisation pacman (Arch)
+  community.general.pacman:
+    update_cache: true
+  when: ansible_facts.os_family == 'Archlinux'
+
+- name: Préflight | Outils de base nécessaires au rôle
+  ansible.builtin.package:
+    name: "{{ lynis100_base_tools }}"
+    state: present
+
+# ---------------------------------------------------------------------- Réseau / SSH
+- name: Préflight | Ports TCP en écoute
   community.general.listen_ports_facts:
     include_non_listening: false
 
 - name: Préflight | Ports SSH actuels et ports en écoute
   ansible.builtin.set_fact:
     lynis100_listen_ports: >-
-      {{ ansible_facts.tcp_listen | rejectattr('address', 'match', '^(127\\.|::1$)')
+      {{ ansible_facts.tcp_listen | rejectattr('address', 'match', '^(127[.]|::1$)')
          | map(attribute='port') | map('int') | unique | sort }}
     lynis100_current_ssh_ports: >-
-      {{ ansible_facts.tcp_listen | selectattr('name', 'in', ['sshd', 'systemd'])
-         | map(attribute='port') | map('int') | select('in', ansible_facts.tcp_listen
-           | selectattr('name', 'equalto', 'sshd') | map(attribute='port') | map('int') | list
-           + [ansible_port | default(22) | int]) | unique | sort }}
+      {{ (ansible_facts.tcp_listen | selectattr('name', 'equalto', 'sshd') | map(attribute='port') | map('int') | list
+          + [(ansible_port | default(22)) | int]) | unique | sort }}
     lynis100_conn_port: "{{ (ansible_port | default(ansible_ssh_port) | default(22)) | int }}"
     lynis100_is_local: "{{ ansible_connection | default('ssh') == 'local' }}"
+
+- name: Préflight | Port SSH conservé (changement refusé)
+  ansible.builtin.set_fact:
+    lynis100_ssh_port: "{{ lynis100_conn_port | int }}"
+  when: not (lynis100_ssh_port_change | bool)
 
 - name: Préflight | Le port SSH cible n'est pas déjà pris par un autre service
   ansible.builtin.assert:
@@ -95,7 +145,7 @@
     fail_msg: "Le port {{ lynis100_ssh_port }} est déjà utilisé par un autre service."
     quiet: true
 
-- name: Préflight | Comptes humains (AllowUsers automatique)
+- name: Préflight | Comptes du système
   ansible.builtin.getent:
     database: passwd
 
@@ -119,7 +169,7 @@
 - name: Préflight | L'utilisateur Ansible doit rester autorisé en SSH
   ansible.builtin.assert:
     that: >-
-      lynis100_is_local
+      not (lynis100_ssh_restrict_users | bool) or lynis100_is_local
       or (ansible_user | default('root')) in lynis100_allow_users_final
     fail_msg: >-
       {{ ansible_user | default('root') }} ne serait pas dans AllowUsers
@@ -128,7 +178,7 @@
 
 - name: Préflight | Au moins un compte autorisé en SSH
   ansible.builtin.assert:
-    that: lynis100_allow_users_final | length > 0
+    that: not (lynis100_ssh_restrict_users | bool) or lynis100_allow_users_final | length > 0
     fail_msg: "Aucun compte à autoriser en SSH : définissez lynis100_ssh_allow_users."
     quiet: true
 
@@ -139,77 +189,45 @@
       or (lynis100_grub_password_pbkdf2 | length > 0)
       or (lynis100_grub_password | length > 0)
     fail_msg: >-
-      lynis100_grub_protect=true mais aucun mot de passe : définissez
-      lynis100_grub_password (ansible-vault) ou lynis100_grub_password_pbkdf2,
-      ou passez lynis100_grub_protect=false.
+      Protection GRUB demandée sans mot de passe : répondez à la question GRUB,
+      ou définissez lynis100_grub_password (ansible-vault) / lynis100_grub_password_pbkdf2.
     quiet: true
 
-- name: Préflight | Docker présent ? (forwarding et pare-feu)
-  ansible.builtin.stat:
-    path: /usr/bin/docker
-  register: lynis100_docker
+# ---------------------------------------------------------------- Environnement
+- name: Préflight | Outils présents (Docker, snap, ufw, firewalld, NetworkManager)
+  ansible.builtin.service_facts:
 
-- name: Préflight | snapd présent ? (squashfs)
+- name: Préflight | Binaires présents
   ansible.builtin.stat:
-    path: /usr/bin/snap
-  register: lynis100_snap
-
-- name: Préflight | ufw présent ?
-  ansible.builtin.stat:
-    path: /usr/sbin/ufw
-  register: lynis100_ufw_bin
+    path: "{{ item }}"
+  loop: [/usr/bin/docker, /usr/bin/snap, /usr/sbin/ufw]
+  register: lynis100_bins
 
 - name: Préflight | Routage IP actif ?
   ansible.builtin.slurp:
     src: /proc/sys/net/ipv4/ip_forward
   register: lynis100_ipfwd
 
+- name: Préflight | SELinux actif ?
+  ansible.builtin.set_fact:
+    lynis100_selinux: "{{ ansible_facts.selinux.status | default('disabled') == 'enabled' }}"
+
 - name: Préflight | Faits d'environnement
   ansible.builtin.set_fact:
-    lynis100_forwarding_needed: "{{ lynis100_docker.stat.exists or (lynis100_ipfwd.content | b64decode | trim) == '1' }}"
-    lynis100_has_snap: "{{ lynis100_snap.stat.exists }}"
-    lynis100_use_ufw: "{{ lynis100_ufw_bin.stat.exists }}"
+    lynis100_has_docker: "{{ lynis100_bins.results[0].stat.exists }}"
+    lynis100_forwarding_needed: "{{ lynis100_bins.results[0].stat.exists or (lynis100_ipfwd.content | b64decode | trim) == '1' }}"
+    lynis100_has_snap: "{{ lynis100_bins.results[1].stat.exists }}"
+    lynis100_use_ufw: "{{ lynis100_bins.results[2].stat.exists and ansible_facts.services['ufw.service'].state | default('') == 'running' }}"
+    lynis100_use_firewalld: "{{ ansible_facts.services['firewalld.service'].state | default('') == 'running' }}"
+    lynis100_networkmanager: "{{ ansible_facts.services['NetworkManager.service'].state | default('') == 'running' }}"
     lynis100_usb_allowed: >-
       {{ (lynis100_disable_usb | bool) and not lynis100_in_container
          and ((lynis100_virt != 'none') or (lynis100_disable_usb_on_bare_metal | bool)) }}
-
-- name: Préflight | Attente du verrou dpkg et mise à jour du cache apt
-  ansible.builtin.apt:
-    update_cache: true
-    cache_valid_time: 600
-    lock_timeout: 300
-  register: lynis100_apt_update
-  retries: 3
-  delay: 10
-  until: lynis100_apt_update is succeeded
-
-- name: Préflight | Dépôt universe actif (Ubuntu)
-  ansible.builtin.command: apt-cache policy fail2ban
-  register: lynis100_universe
-  changed_when: false
-  when: ansible_facts.distribution == 'Ubuntu'
-  failed_when: "'Candidate: (none)' in lynis100_universe.stdout or lynis100_universe.stdout == ''"
-  environment:
-    LC_ALL: C
 
 - name: Préflight | Épinglages apt-listbugs présents ?
   ansible.builtin.stat:
     path: /etc/apt/preferences.d/apt-listbugs
   register: lynis100_listbugs_pin
-
-- name: Préflight | Outils de base nécessaires au rôle
-  ansible.builtin.apt:
-    name:
-      - iproute2        # ss
-      - util-linux      # findmnt, mount
-      - procps          # sysctl
-      - openssl
-      - grub-common     # grub-mkpasswd-pbkdf2
-      - openssh-server  # sshd -t
-      - lsb-release
-      - python3-apt
-    state: present
-    lock_timeout: 300
 
 - name: Préflight | Dossiers de configuration utilisés par le rôle
   ansible.builtin.file:
@@ -223,7 +241,6 @@
     - /etc/sysctl.d
     - /etc/security/limits.d
     - /etc/profile.d
-    - /etc/apt/apt.conf.d
     - /etc/ssh/sshd_config.d
     - /etc/systemd/coredump.conf.d
 
@@ -235,7 +252,7 @@
     group: root
     mode: "0700"
 
-- name: Préflight | Archive des fichiers qui vont être modifiés (module archive)
+- name: Préflight | Archive des fichiers qui vont être modifiés
   community.general.archive:
     path: "{{ lynis100_backup_paths }}"
     dest: "{{ lynis100_backup_dir }}/{{ ansible_facts.date_time.iso8601_basic_short }}.tar.gz"
@@ -250,27 +267,35 @@
       - /etc/systemd/coredump.conf
       - /etc/fail2ban
       - /etc/nftables.conf
+      - /etc/sysconfig/nftables.conf
       - /etc/usbguard
       - /etc/resolv.conf
       - /etc/resolv.conf.head
       - /etc/dhcp/dhclient.conf
+      - /etc/NetworkManager/conf.d
       - /etc/default/sysstat
       - /etc/default/debsums
       - /etc/aide/aide.conf
+      - /etc/aide.conf
       - /etc/issue
       - /etc/issue.net
       - /etc/grub.d/40_custom
       - /etc/grub.d/10_linux
+      - /boot/grub2/user.cfg
       - /etc/nginx
       - /etc/lynis
       - /etc/apt/preferences.d
+      - /etc/dnf/automatic.conf
 
 - name: Préflight | Récapitulatif
   ansible.builtin.debug:
     msg:
-      - "Système      : {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }} ({{ lynis100_virt }})"
-      - "SSH          : port {{ lynis100_current_ssh_ports | join(',') | default('?', true) }} -> {{ lynis100_ssh_port }}"
-      - "AllowUsers   : {{ lynis100_allow_users_final | join(' ') }}"
-      - "Pare-feu     : {{ 'ufw' if lynis100_use_ufw else 'nftables' }} {{ '(ignoré : Docker)' if lynis100_docker.stat.exists else '' }}"
+      - "Système      : {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }} ({{ ansible_facts.os_family }}, {{ lynis100_virt }})"
+      - "SSH          : port {{ lynis100_current_ssh_ports | join(',') }} -> {{ lynis100_ssh_port }}"
+      - "AllowUsers   : {{ lynis100_allow_users_final | join(' ') if lynis100_ssh_restrict_users | bool else 'non modifié' }}"
+      - >-
+        Pare-feu     : {{ 'non modifié' if not lynis100_firewall | bool
+        else ('firewalld' if lynis100_use_firewalld else ('ufw' if lynis100_use_ufw else 'nftables')) }}
       - "USB          : {{ 'désactivé' if lynis100_usb_allowed else 'non modifié' }}"
+      - "SELinux      : {{ 'actif (port SSH déclaré à SELinux)' if lynis100_selinux else 'inactif' }}"
       - "Sauvegarde   : {{ lynis100_backup_dir }}/{{ ansible_facts.date_time.iso8601_basic_short }}.tar.gz"

@@ -85,7 +85,7 @@
         - name: nginx | Mise à jour du pare-feu nftables
           ansible.builtin.template:
             src: nftables.conf.j2
-            dest: /etc/nftables.conf
+            dest: "{{ lynis100_nft_conf }}"
             owner: root
             group: root
             mode: "0700"
@@ -94,8 +94,19 @@
           when:
             - lynis100_firewall | bool
             - not lynis100_use_ufw
+            - not lynis100_use_firewalld
             - not lynis100_in_container
-            - not lynis100_docker.stat.exists
+            - not lynis100_has_docker
+
+        - name: nginx | Port 443 ouvert (firewalld)
+          ansible.posix.firewalld:
+            port: 443/tcp
+            permanent: true
+            immediate: true
+            state: enabled
+          when:
+            - lynis100_firewall | bool
+            - lynis100_use_firewalld
 
         - name: nginx | Port 443 ouvert (ufw)
           community.general.ufw:

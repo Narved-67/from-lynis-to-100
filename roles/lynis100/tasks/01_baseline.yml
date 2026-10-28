@@ -6,13 +6,14 @@
   ansible.builtin.file:
     path: /etc/apt/preferences.d/apt-listbugs
     state: absent
-  when: lynis100_listbugs_pin.stat.exists
+  when:
+    - ansible_facts.os_family == 'Debian'
+    - lynis100_listbugs_pin.stat.exists
 
-- name: Audit initial | Installation de Lynis et de dig
-  ansible.builtin.apt:
-    name: [lynis, bind9-dnsutils]
+- name: Audit initial | Installation de Lynis
+  ansible.builtin.package:
+    name: "{{ lynis100_lynis_pkg }}"
     state: present
-    lock_timeout: 300
 
 - name: Audit initial | Lancement de Lynis (1 à 3 minutes)
   ansible.builtin.command: lynis audit system --quick --no-colors

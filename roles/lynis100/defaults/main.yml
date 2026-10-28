@@ -22,6 +22,10 @@ lynis100_min_free_mb: 2048
 # ---------------------------------------------------------------------- SSH ---
 # Nouveau port SSH. Mettre la valeur actuelle (22) pour ne pas le changer.
 lynis100_ssh_port: 2222
+# false : le port SSH actuel est conservé (question du questionnaire)
+lynis100_ssh_port_change: true
+# Restreindre SSH aux comptes humains (AllowUsers) : root ne pourra plus se connecter
+lynis100_ssh_restrict_users: true
 # Comptes autorisés en SSH (AllowUsers). Liste vide = détection automatique :
 # comptes humains (UID >= 1000, shell valide) + l'utilisateur Ansible.
 lynis100_ssh_allow_users: []
@@ -61,6 +65,7 @@ lynis100_sha_crypt_max_rounds: 10000
 # Appliquer l'âge des mots de passe aux comptes existants (chage)
 lynis100_apply_aging_to_existing_users: true
 # Déconnexion des shells inactifs (secondes)
+lynis100_tmout_enabled: true
 lynis100_tmout: 900
 
 # Bannière légale /etc/issue et /etc/issue.net (BANN-7126/7130). Lynis compte
@@ -74,6 +79,8 @@ lynis100_banner: |
 lynis100_upgrade_packages: true
 
 # ---------------------------------------------------------------- Montages ---
+# Options nodev/nosuid/noexec, /tmp en tmpfs, /proc en hidepid=2
+lynis100_harden_mounts: true
 lynis100_tmp_tmpfs_size: 1G
 # Créer un LV séparé pour /home si / est sur LVM et que /home n'est pas séparé
 # (ex : "2g"). Vide = ne rien créer.
@@ -160,6 +167,9 @@ lynis100_nginx_selfsigned_https: true
 lynis100_dns_servers:
   - 8.8.8.8
   - 1.1.1.1
+# DNS primaire / secondaire fournis au questionnaire (prioritaires sur le DHCP)
+lynis100_dns_primary: ""
+lynis100_dns_secondary: ""
 
 # ------------------------------------------------------------- Exceptions ---
 lynis100_exceptions: true

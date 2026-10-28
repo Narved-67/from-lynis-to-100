@@ -1,7 +1,18 @@
 ---
-# from-lynis-to-100 : durcissement Debian/Ubuntu pour un score Lynis de 100
+# from-lynis-to-100 : durcissement Linux (Debian, Ubuntu, RHEL/Fedora, Arch) pour un score Lynis de 100
 #   ansible-galaxy collection install -r requirements.yml
-#   ansible-playbook -i inventory.ini site.yml -e lynis100_i_have_a_snapshot=true --ask-vault-pass
+#   ansible-playbook -i inventory.ini site.yml -K
+# Sans questions (valeurs de group_vars / defaults) : -e lynis100_assume_yes=true
+- name: Questions avant durcissement
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Questionnaire
+      ansible.builtin.import_tasks: questions.yml
+      tags: [always]
+
 - name: Durcissement Lynis 100
   hosts: lynis_targets
   become: true
@@ -10,14 +21,41 @@
   pre_tasks:
     - name: Python 3 présent sur la cible (requis par Ansible)
       ansible.builtin.raw: >-
-        test -x /usr/bin/python3 ||
-        (apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q python3 python3-apt)
+        command -v python3 >/dev/null 2>&1 ||
+        (command -v apt-get >/dev/null 2>&1 && apt-get update -q &&
+         DEBIAN_FRONTEND=noninteractive apt-get install -y -q python3 python3-apt) ||
+        (command -v dnf >/dev/null 2>&1 && dnf -y -q install python3) ||
+        (command -v yum >/dev/null 2>&1 && yum -y -q install python3) ||
+        (command -v pacman >/dev/null 2>&1 && pacman -Sy --noconfirm --needed python) ||
+        (command -v zypper >/dev/null 2>&1 && zypper -n -q install python3)
       register: lynis100_py
-      changed_when: "'Setting up' in lynis100_py.stdout"
+      changed_when: lynis100_py.stdout | regex_search('Setting up|Installed|installing', ignorecase=True) is not none
       tags: [always]
 
     - name: Collecte des faits
       ansible.builtin.setup:
+      tags: [always]
+
+    - name: Réponses du questionnaire appliquées
+      vars:
+        lynis100_a: "{{ hostvars['localhost']['lynis100_answers'] | default({}) }}"
+        lynis100_pw: "{{ hostvars['localhost']['lynis100_grub_password_answer'] | default('') }}"
+      ansible.builtin.set_fact:
+        lynis100_i_have_a_snapshot: >-
+          {{ lynis100_i_have_a_snapshot | default(false) | bool or (hostvars['localhost']['lynis100_ask'] is defined) }}
+        lynis100_ssh_port_change: "{{ lynis100_a.ssh_port_change | default(lynis100_ssh_port_change | default(true)) }}"
+        lynis100_ssh_restrict_users: "{{ lynis100_a.ssh_restrict_users | default(lynis100_ssh_restrict_users | default(true)) }}"
+        lynis100_firewall: "{{ lynis100_a.firewall | default(lynis100_firewall | default(true)) }}"
+        lynis100_disable_usb: "{{ lynis100_a.disable_usb | default(lynis100_disable_usb | default(true)) }}"
+        lynis100_harden_mounts: "{{ lynis100_a.harden_mounts | default(lynis100_harden_mounts | default(true)) }}"
+        lynis100_tmout_enabled: "{{ lynis100_a.tmout | default(lynis100_tmout_enabled | default(true)) }}"
+        lynis100_apply_aging_to_existing_users: "{{ lynis100_a.password_aging | default(lynis100_apply_aging_to_existing_users | default(true)) }}"
+        lynis100_remove_compilers: "{{ lynis100_a.remove_compilers | default(lynis100_remove_compilers | default(true)) }}"
+        lynis100_grub_protect: "{{ lynis100_a.grub_protect | default(lynis100_grub_protect | default(true)) }}"
+        lynis100_grub_password: "{{ lynis100_pw if lynis100_pw | length > 0 else (lynis100_grub_password | default('')) }}"
+        lynis100_dns_primary: "{{ lynis100_a.dns_primary | default('', true) or (lynis100_dns_primary | default('')) }}"
+        lynis100_dns_secondary: "{{ lynis100_a.dns_secondary | default('', true) or (lynis100_dns_secondary | default('')) }}"
+      no_log: true
       tags: [always]
 
   roles:

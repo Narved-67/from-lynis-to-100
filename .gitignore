@@ -5,3 +5,4 @@ group_vars/*/
 *.retry
 .vault_pass*
 .ansible/
+lynis100_answers.yml

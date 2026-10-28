@@ -4,7 +4,7 @@
 bantime  = {{ lynis100_fail2ban_bantime }}
 findtime = {{ lynis100_fail2ban_findtime }}
 maxretry = {{ lynis100_fail2ban_maxretry }}
-banaction = {{ 'ufw' if lynis100_use_ufw else 'nftables' }}
+banaction = {{ 'firewallcmd-rich-rules' if lynis100_use_firewalld else ('ufw' if lynis100_use_ufw else 'nftables') }}
 ignoreip = {{ lynis100_fail2ban_ignoreip | join(' ') }}
 
 [sshd]

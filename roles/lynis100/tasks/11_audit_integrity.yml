@@ -3,9 +3,9 @@
 # 11 - Comptabilité, audit, intégrité, antimalware
 # ACCT-9622 ACCT-9626 ACCT-9628 ACCT-9630 FINT-4350 FINT-4402 HRDN-7230 PKGS-7370
 # =============================================================================
-- name: Audit | Comptabilité des processus (acct)
+- name: Audit | Comptabilité des processus (acct / psacct)
   ansible.builtin.systemd:
-    name: acct
+    name: "{{ lynis100_acct_service }}"
     enabled: true
     state: started
   failed_when: false
@@ -17,6 +17,7 @@
     line: 'ENABLED="true"'
     create: true
     mode: "0644"
+  when: ansible_facts.os_family == 'Debian'
 
 - name: Audit | Service sysstat
   ansible.builtin.systemd:
@@ -54,27 +55,41 @@
     line: CRON_CHECK=weekly
     create: true
     mode: "0644"
+  when: ansible_facts.os_family == 'Debian'
 
 - name: Intégrité | AIDE en SHA512 (FINT-4402)
   ansible.builtin.lineinfile:
-    path: /etc/aide/aide.conf
+    path: "{{ lynis100_aide_conf }}"
     regexp: '^Checksums\s*='
     line: Checksums = sha512
     create: false
-  register: lynis100_aide_conf
+  register: lynis100_aide_conf_edit
   failed_when: false
 
 - name: Intégrité | Base AIDE existante ?
   ansible.builtin.stat:
-    path: /var/lib/aide/aide.db
-  register: lynis100_aide_db
+    path: "{{ lynis100_aide_db }}"
+  register: lynis100_aide_db_stat
 
 - name: Intégrité | Initialisation de la base AIDE (plusieurs minutes)
-  ansible.builtin.command: aideinit -y -f
-  when: lynis100_aide_conf is changed or not lynis100_aide_db.stat.exists
+  ansible.builtin.command:
+    argv: "{{ lynis100_aide_init_cmd }}"
+  when: lynis100_aide_conf_edit is changed or not lynis100_aide_db_stat.stat.exists
+  register: lynis100_aide_init
   changed_when: true
   async: 3600
   poll: 15
+  failed_when: false
+
+- name: Intégrité | Nouvelle base AIDE mise en service (RedHat, Arch)
+  ansible.builtin.copy:
+    src: "{{ lynis100_aide_new_db }}"
+    dest: "{{ lynis100_aide_db }}"
+    remote_src: true
+    mode: "0600"
+  when:
+    - lynis100_aide_new_db | length > 0
+    - lynis100_aide_init is changed
   failed_when: false
 
 - name: Antimalware | Signatures ClamAV déjà présentes ?
@@ -108,7 +123,7 @@
     name: "{{ item }}"
     enabled: true
     state: started
-  loop: [clamav-freshclam, clamav-daemon]
+  loop: "{{ lynis100_clamav_services }}"
   failed_when: false
 
 - name: Antimalware | Base rkhunter existante ?

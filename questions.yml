@@ -1,0 +1,202 @@
+---
+# =============================================================================
+# Questionnaire de démarrage (exécuté sur le poste de contrôle).
+# Seuls les changements CRITIQUES sont soumis à confirmation (y = appliquer,
+# autre réponse = ne pas appliquer ce changement). Les DNS saisis et les
+# réponses sont mémorisés dans lynis100_answers.yml pour les exécutions
+# suivantes (le mot de passe GRUB n'est jamais enregistré).
+#   Sans questions : -e lynis100_assume_yes=true
+#   Reposer les questions : -e lynis100_reask=true
+# =============================================================================
+- name: Questions | Présentation
+  ansible.builtin.debug:
+    msg:
+      - "Seuls les changements critiques sont demandés. y = appliquer."
+      - "Toute autre réponse ignore le changement : la machine reste utilisable, mais Lynis n'atteindra pas 100 %."
+  when: not (lynis100_assume_yes | default(false) | bool)
+
+- name: Questions | Snapshot (demandé à chaque exécution)
+  ansible.builtin.pause:
+    prompt: "[OBLIGATOIRE] Avez-vous fait un snapshot ou une sauvegarde de la machine ? (y/N)"
+  register: lynis100_q_snapshot
+  when: not (lynis100_assume_yes | default(false) | bool)
+
+- name: Questions | Arrêt sans snapshot
+  ansible.builtin.fail:
+    msg: "Faites un snapshot ou une sauvegarde, puis relancez."
+  when:
+    - not (lynis100_assume_yes | default(false) | bool)
+    - (lynis100_q_snapshot.user_input | default('') | lower) != 'y'
+
+- name: Questions | Réponses déjà enregistrées ?
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/lynis100_answers.yml"
+  register: lynis100_answers_file
+
+- name: Questions | Lecture des réponses enregistrées
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/lynis100_answers.yml"
+    name: lynis100_saved
+  when: lynis100_answers_file.stat.exists
+
+- name: Questions | Réutiliser les réponses enregistrées ?
+  ansible.builtin.pause:
+    prompt: |-
+      Réponses enregistrées trouvées :
+      {{ lynis100_saved | to_nice_yaml }}
+      Les réutiliser ? (y/N)
+  register: lynis100_q_reuse
+  when:
+    - lynis100_answers_file.stat.exists
+    - not (lynis100_assume_yes | default(false) | bool)
+    - not (lynis100_reask | default(false) | bool)
+
+- name: Questions | Mode
+  ansible.builtin.set_fact:
+    lynis100_ask: >-
+      {{ not (lynis100_assume_yes | default(false) | bool)
+         and not (lynis100_answers_file.stat.exists
+                  and (lynis100_q_reuse.user_input | default('') | lower) == 'y'
+                  and not (lynis100_reask | default(false) | bool)) }}
+
+- name: Questions | Changements critiques
+  when: lynis100_ask | bool
+  block:
+    - name: Questions | Port SSH
+      ansible.builtin.pause:
+        prompt: >-
+          [CRITIQUE] Le port SSH va passer de 22 à {{ lynis100_ssh_port_target | default(2222) }}
+          (vos clients, scripts et inventaire devront utiliser ce port). Appliquer ? (y/N)
+      register: lynis100_q_port
+
+    - name: Questions | Restriction SSH
+      ansible.builtin.pause:
+        prompt: >-
+          [CRITIQUE] Seuls les comptes humains (UID >= 1000) pourront se connecter en SSH :
+          root ne pourra PLUS se connecter en SSH. Appliquer ? (y/N)
+      register: lynis100_q_users
+
+    - name: Questions | Pare-feu
+      ansible.builtin.pause:
+        prompt: >-
+          [CRITIQUE] Le pare-feu va bloquer toutes les connexions entrantes, sauf SSH et les
+          services en écoute maintenant. Appliquer ? (y/N)
+      register: lynis100_q_fw
+
+    - name: Questions | USB
+      ansible.builtin.pause:
+        prompt: >-
+          [CRITIQUE] Tout l'USB va être désactivé (clés, disques, et clavier/souris USB),
+          sur machine virtuelle uniquement. Appliquer ? (y/N)
+      register: lynis100_q_usb
+
+    - name: Questions | Montages
+      ansible.builtin.pause:
+        prompt: >-
+          [CRITIQUE] /tmp, /dev/shm, /var/tmp, /var/log... passent en noexec (plus aucun programme
+          exécutable depuis ces dossiers) et chaque utilisateur ne verra plus que ses processus. Appliquer ? (y/N)
+      register: lynis100_q_mounts
+
+    - name: Questions | Déconnexion automatique
+      ansible.builtin.pause:
+        prompt: "[CRITIQUE] Les sessions shell inactives seront fermées après 15 minutes. Appliquer ? (y/N)"
+      register: lynis100_q_tmout
+
+    - name: Questions | Expiration des mots de passe
+      ansible.builtin.pause:
+        prompt: >-
+          [CRITIQUE] Les mots de passe des comptes existants (root compris) expireront tous les
+          90 jours. Appliquer ? (y/N)
+      register: lynis100_q_aging
+
+    - name: Questions | Compilateurs
+      ansible.builtin.pause:
+        prompt: "[CRITIQUE] gcc, g++ et binutils vont être désinstallés (plus de compilation possible). Appliquer ? (y/N)"
+      register: lynis100_q_compilers
+
+    - name: Questions | GRUB
+      ansible.builtin.pause:
+        prompt: >-
+          [CRITIQUE] Un mot de passe sera exigé pour modifier le démarrage dans GRUB
+          (le démarrage normal reste libre). Appliquer ? (y/N)
+      register: lynis100_q_grub
+
+    - name: Questions | Mot de passe GRUB
+      ansible.builtin.pause:
+        prompt: "Mot de passe GRUB (non enregistré)"
+        echo: false
+      register: lynis100_q_grub_pw
+      when: (lynis100_q_grub.user_input | lower) == 'y'
+
+    - name: Questions | DNS primaire
+      ansible.builtin.pause:
+        prompt: "Serveur DNS primaire (Entrée = détection automatique, ex. 192.168.42.2)"
+      register: lynis100_q_dns1
+
+    - name: Questions | DNS secondaire
+      ansible.builtin.pause:
+        prompt: "Serveur DNS secondaire (Entrée = détection automatique, ex. 1.1.1.1)"
+      register: lynis100_q_dns2
+
+    - name: Questions | Réponses
+      ansible.builtin.set_fact:
+        lynis100_answers:
+          ssh_port_change: "{{ (lynis100_q_port.user_input | lower) == 'y' }}"
+          ssh_restrict_users: "{{ (lynis100_q_users.user_input | lower) == 'y' }}"
+          firewall: "{{ (lynis100_q_fw.user_input | lower) == 'y' }}"
+          disable_usb: "{{ (lynis100_q_usb.user_input | lower) == 'y' }}"
+          harden_mounts: "{{ (lynis100_q_mounts.user_input | lower) == 'y' }}"
+          tmout: "{{ (lynis100_q_tmout.user_input | lower) == 'y' }}"
+          password_aging: "{{ (lynis100_q_aging.user_input | lower) == 'y' }}"
+          remove_compilers: "{{ (lynis100_q_compilers.user_input | lower) == 'y' }}"
+          grub_protect: "{{ (lynis100_q_grub.user_input | lower) == 'y' }}"
+          dns_primary: "{{ lynis100_q_dns1.user_input | trim }}"
+          dns_secondary: "{{ lynis100_q_dns2.user_input | trim }}"
+
+    - name: Questions | Mémorisation (sans mot de passe)
+      ansible.builtin.copy:
+        dest: "{{ playbook_dir }}/lynis100_answers.yml"
+        content: "{{ lynis100_answers | to_nice_yaml }}"
+        mode: "0600"
+
+- name: Questions | Réponses réutilisées ou mode non interactif
+  ansible.builtin.set_fact:
+    # assume_yes : aucune réponse imposée, les valeurs de group_vars / defaults s'appliquent
+    lynis100_answers: "{{ {} if (lynis100_assume_yes | default(false) | bool) else (lynis100_saved | default({})) }}"
+  when: not (lynis100_ask | bool)
+
+- name: Questions | Format des serveurs DNS saisis
+  ansible.builtin.assert:
+    that: >-
+      lynis100_answers[item] | default('') | length == 0
+      or lynis100_answers[item] is match('^[0-9a-fA-F:.]+$')
+    fail_msg: "Adresse DNS invalide ({{ item }}) : {{ lynis100_answers[item] | default('') }}. Relancez avec -e lynis100_reask=true"
+    quiet: true
+  loop: [dns_primary, dns_secondary]
+
+- name: Questions | Mot de passe GRUB pour cette exécution
+  ansible.builtin.set_fact:
+    lynis100_grub_password_answer: "{{ lynis100_q_grub_pw.user_input | default('') }}"
+  no_log: true
+
+- name: Questions | Mot de passe GRUB demandé (réponses réutilisées)
+  ansible.builtin.pause:
+    prompt: "Mot de passe GRUB (non enregistré)"
+    echo: false
+  register: lynis100_q_grub_pw2
+  when:
+    - not (lynis100_ask | bool)
+    - lynis100_answers.grub_protect | default(false) | bool
+    - lynis100_grub_password | default('') | length == 0
+    - lynis100_grub_password_pbkdf2 | default('') | length == 0
+    - not (lynis100_assume_yes | default(false) | bool)
+
+- name: Questions | Mot de passe GRUB retenu
+  ansible.builtin.set_fact:
+    lynis100_grub_password_answer: "{{ lynis100_q_grub_pw2.user_input }}"
+  no_log: true
+  when: lynis100_q_grub_pw2.user_input is defined
+
+- name: Questions | Récapitulatif
+  ansible.builtin.debug:
+    msg: "{{ lynis100_answers }}"

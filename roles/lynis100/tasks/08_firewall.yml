@@ -11,13 +11,13 @@
       {{ 'désactivé par lynis100_firewall' if not (lynis100_firewall | bool)
          else ('conteneur' if lynis100_in_container else 'Docker gère ses propres règles') }}
       (FIRE-4590 : 5 points perdus si aucun pare-feu n'est actif).
-  when: not (lynis100_firewall | bool) or lynis100_in_container or lynis100_docker.stat.exists
+  when: not (lynis100_firewall | bool) or lynis100_in_container or lynis100_has_docker
 
 - name: Pare-feu | Configuration
   when:
     - lynis100_firewall | bool
     - not lynis100_in_container
-    - not lynis100_docker.stat.exists
+    - not lynis100_has_docker
   block:
     - name: Pare-feu | Ports TCP à ouvrir
       ansible.builtin.set_fact:
@@ -28,12 +28,14 @@
              | unique | sort }}
 
     - name: Pare-feu | nftables
-      when: not lynis100_use_ufw
+      when:
+        - not lynis100_use_ufw
+        - not lynis100_use_firewalld
       block:
         - name: Pare-feu | Règles nftables (validées avant écriture)
           ansible.builtin.template:
             src: nftables.conf.j2
-            dest: /etc/nftables.conf
+            dest: "{{ lynis100_nft_conf }}"
             owner: root
             group: root
             mode: "0700"
@@ -70,6 +72,28 @@
         - name: Pare-feu | ufw activé
           community.general.ufw:
             state: enabled
+
+    - name: Pare-feu | firewalld (RHEL, Fedora, Rocky, Alma)
+      when: lynis100_use_firewalld
+      block:
+        - name: Pare-feu | firewalld autorise les ports TCP (permanent + immédiat)
+          ansible.posix.firewalld:
+            port: "{{ item }}/tcp"
+            permanent: true
+            immediate: true
+            state: enabled
+          loop: "{{ lynis100_fw_tcp_ports }}"
+
+        - name: Pare-feu | firewalld bloque le reste (zone par défaut en drop)
+          ansible.builtin.command: firewall-cmd --get-default-zone
+          register: lynis100_fw_zone
+          changed_when: false
+
+        - name: Pare-feu | Zone par défaut
+          ansible.builtin.debug:
+            msg: >-
+              Zone firewalld par défaut : {{ lynis100_fw_zone.stdout }}. Les ports listés sont ouverts dans
+              cette zone ; les autres services de la zone sont conservés (pas de coupure).
 
     - name: Pare-feu | Ports ouverts
       ansible.builtin.debug:

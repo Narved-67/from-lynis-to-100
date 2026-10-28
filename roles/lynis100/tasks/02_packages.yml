@@ -1,53 +1,69 @@
 ---
 # =============================================================================
-# 02 - Paquets de sécurité
-# DEB-0280 DEB-0831 DEB-0880 AUTH-9262 PKGS-7370 PKGS-7394 PKGS-7420
+# 02 - Paquets de sécurité (liste propre à chaque famille : vars/<famille>.yml)
+# DEB-0280 DEB-0811 DEB-0831 DEB-0880 AUTH-9262 PKGS-7370 PKGS-7394 PKGS-7420
 # ACCT-9622 ACCT-9626 ACCT-9628 FINT-4350 HRDN-7230 USB-3000
-# apt-listbugs est installé à la toute fin (15_exceptions.yml) : il épingle
-# les paquets bogués et bloquerait ces installations.
+# Sur Debian, apt-listbugs est installé à la toute fin (15_exceptions.yml) :
+# il épingle les paquets bogués et bloquerait ces installations.
 # =============================================================================
-- name: Paquets | Vérification de disponibilité dans les dépôts
+- name: Paquets | Disponibilité dans les dépôts apt (Debian/Ubuntu)
   ansible.builtin.command: apt-cache policy {{ item }}
   loop: "{{ lynis100_security_packages }}"
   register: lynis100_pkg_policy
   changed_when: false
   environment:
     LC_ALL: C
+  when: ansible_facts.os_family == 'Debian'
 
-- name: Paquets | Paquets disponibles
-  ansible.builtin.set_fact:
-    lynis100_pkgs_ok: >-
-      {{ lynis100_pkg_policy.results | rejectattr('stdout', 'search', 'Candidate: \(none\)')
-         | rejectattr('stdout', 'equalto', '') | map(attribute='item') | list }}
-    lynis100_pkgs_missing: >-
-      {{ lynis100_security_packages | difference(lynis100_pkg_policy.results
-         | rejectattr('stdout', 'search', 'Candidate: \(none\)')
-         | rejectattr('stdout', 'equalto', '') | map(attribute='item') | list) }}
-
-- name: Paquets | Avertissement paquets introuvables
-  ansible.builtin.debug:
-    msg: "Paquets introuvables (tests Lynis correspondants perdus) : {{ lynis100_pkgs_missing | join(', ') }}"
-  when: lynis100_pkgs_missing | length > 0
-
-- name: Paquets | Installation
+- name: Paquets | Installation en une fois, sans Recommends (Debian/Ubuntu)
   ansible.builtin.apt:
-    name: "{{ lynis100_pkgs_ok }}"
+    name: >-
+      {{ lynis100_pkg_policy.results | rejectattr('stdout', 'search', 'Candidate: [(]none[)]')
+         | rejectattr('stdout', 'equalto', '') | map(attribute='item') | list }}
     state: present
     install_recommends: false
     lock_timeout: 300
-  register: lynis100_pkg_install
-  retries: 2
-  delay: 15
-  until: lynis100_pkg_install is succeeded
+  register: lynis100_pkg_install_deb
+  when: ansible_facts.os_family == 'Debian'
+
+- name: "Paquets | Installation un par un (RedHat, Arch : un paquet absent n'empêche pas les autres)"
+  ansible.builtin.package:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ lynis100_security_packages }}"
+  register: lynis100_pkg_install_other
+  failed_when: false
+  when: ansible_facts.os_family != 'Debian'
+
+- name: Paquets | Bilan
+  ansible.builtin.set_fact:
+    lynis100_pkg_install: "{{ lynis100_pkg_install_deb if ansible_facts.os_family == 'Debian' else lynis100_pkg_install_other }}"
+    lynis100_pkgs_missing: >-
+      {{ (lynis100_pkg_policy.results | default([]) | selectattr('stdout', 'defined')
+          | selectattr('stdout', 'search', 'Candidate: [(]none[)]') | map(attribute='item') | list)
+         if ansible_facts.os_family == 'Debian'
+         else (lynis100_pkg_install_other.results | default([]) | selectattr('failed', 'defined')
+               | selectattr('failed') | map(attribute='item') | list) }}
+
+- name: Paquets | Paquets introuvables dans les dépôts
+  ansible.builtin.debug:
+    msg: >-
+      Non installés (les tests Lynis correspondants perdront des points) :
+      {{ lynis100_pkgs_missing | join(', ') }}
+  when: lynis100_pkgs_missing | length > 0
 
 - name: Paquets | Mise à jour de sécurité du système (PKGS-7392)
+  ansible.builtin.package:
+    name: "*"
+    state: latest  # noqa: package-latest
+  when:
+    - lynis100_upgrade_packages | bool
+    - ansible_facts.os_family != 'Debian'
+
+- name: Paquets | Mise à jour de sécurité (Debian/Ubuntu)
   ansible.builtin.apt:
     upgrade: safe
     lock_timeout: 300
-  when: lynis100_upgrade_packages | bool
-  register: lynis100_upgrade
-
-- name: Paquets | Redémarrage nécessaire ?
-  ansible.builtin.stat:
-    path: /var/run/reboot-required
-  register: lynis100_reboot_required
+  when:
+    - lynis100_upgrade_packages | bool
+    - ansible_facts.os_family == 'Debian'

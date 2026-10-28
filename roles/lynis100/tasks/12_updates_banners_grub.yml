@@ -3,22 +3,57 @@
 # 12 - Mises à jour automatiques, bannières, GRUB, droits de fichiers
 # PKGS-7420 BANN-7126 BANN-7130 BOOT-5122 FILE-7524
 # =============================================================================
-- name: Mises à jour | unattended-upgrades
-  ansible.builtin.copy:
-    dest: /etc/apt/apt.conf.d/20auto-upgrades
-    content: |
-      APT::Periodic::Update-Package-Lists "1";
-      APT::Periodic::Unattended-Upgrade "1";
-    owner: root
-    group: root
-    mode: "0644"
+- name: Mises à jour | unattended-upgrades (Debian/Ubuntu)
+  when: lynis100_auto_updates == 'unattended-upgrades'
+  block:
+    - name: Mises à jour | Activation
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+        owner: root
+        group: root
+        mode: "0644"
 
-- name: Mises à jour | Service unattended-upgrades
-  ansible.builtin.systemd:
-    name: unattended-upgrades
-    enabled: true
-    state: started
-  failed_when: false
+    - name: Mises à jour | Service unattended-upgrades
+      ansible.builtin.systemd:
+        name: unattended-upgrades
+        enabled: true
+        state: started
+      failed_when: false
+
+- name: Mises à jour | dnf-automatic (RHEL, Fedora, Rocky, Alma)
+  when: lynis100_auto_updates == 'dnf-automatic'
+  vars:
+    lynis100_dnf5: "{{ ansible_facts.distribution == 'Fedora' and ansible_facts.distribution_major_version | int >= 41 }}"
+  block:
+    - name: Mises à jour | Paquet dnf-automatic
+      ansible.builtin.package:
+        name: "{{ 'dnf5-plugin-automatic' if lynis100_dnf5 else 'dnf-automatic' }}"
+        state: present
+
+    - name: Mises à jour | Application automatique des mises à jour de sécurité
+      community.general.ini_file:
+        path: /etc/dnf/automatic.conf
+        section: commands
+        option: "{{ item.key }}"
+        value: "{{ item.value }}"
+        mode: "0644"
+      loop:
+        - {key: upgrade_type, value: security}
+        - {key: apply_updates, value: "yes"}
+
+    - name: Mises à jour | Minuteur dnf-automatic
+      ansible.builtin.systemd:
+        name: "{{ 'dnf5-automatic.timer' if lynis100_dnf5 else 'dnf-automatic.timer' }}"
+        enabled: true
+        state: started
+
+- name: Mises à jour | Arch Linux (pas d'outil officiel)
+  ansible.builtin.debug:
+    msg: "Arch Linux : pas de mise à jour automatique officielle (PKGS-7420 peut perdre des points)."
+  when: lynis100_auto_updates == 'none'
 
 - name: Bannières | /etc/issue et /etc/issue.net
   ansible.builtin.copy:
@@ -35,16 +70,21 @@
     - lynis100_grub_protect | bool
     - not lynis100_in_container
   block:
-    - name: GRUB | Fichiers GRUB présents ?
+    - name: GRUB | GRUB installé ?
       ansible.builtin.stat:
-        path: /etc/grub.d/10_linux
+        path: "{{ '/etc/grub.d/10_linux' if lynis100_grub_mode == 'grub.d' else lynis100_grub_cfg }}"
       register: lynis100_grub_linux
+
+    - name: GRUB | Absent (systemd-boot ou autre chargeur)
+      ansible.builtin.debug:
+        msg: "GRUB introuvable : protection du chargeur ignorée (BOOT-5122)."
+      when: not lynis100_grub_linux.stat.exists
 
     - name: GRUB | Hash du mot de passe (généré sur la cible)
       ansible.builtin.shell:
         cmd: >-
           set -o pipefail;
-          printf '%s\n%s\n' "$GRUB_PW" "$GRUB_PW" | grub-mkpasswd-pbkdf2 | awk '/grub.pbkdf2/{print $NF}'
+          printf '%s\n%s\n' "$GRUB_PW" "$GRUB_PW" | {{ lynis100_grub_mkpasswd }} | awk '/grub.pbkdf2/{print $NF}'
         executable: /bin/bash
       environment:
         GRUB_PW: "{{ lynis100_grub_password }}"
@@ -75,15 +115,31 @@
           set superusers="{{ lynis100_grub_user }}"
           password_pbkdf2 {{ lynis100_grub_user }} {{ lynis100_grub_hash }}
       no_log: true
-      when: lynis100_grub_linux.stat.exists
+      when:
+        - lynis100_grub_linux.stat.exists
+        - lynis100_grub_mode == 'grub.d'
       notify: Mettre à jour GRUB
+
+    - name: GRUB | Mot de passe dans user.cfg (méthode grub2-setpassword de RHEL)
+      ansible.builtin.copy:
+        dest: "{{ lynis100_grub_cfg | dirname }}/user.cfg"
+        content: "GRUB2_PASSWORD={{ lynis100_grub_hash }}\n"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      when:
+        - lynis100_grub_linux.stat.exists
+        - lynis100_grub_mode == 'user.cfg'
 
     - name: GRUB | Démarrage normal sans mot de passe (--unrestricted)
       ansible.builtin.replace:
         path: /etc/grub.d/10_linux
         regexp: '^CLASS="--class gnu-linux --class gnu --class os"$'
         replace: 'CLASS="--class gnu-linux --class gnu --class os --unrestricted"'
-      when: lynis100_grub_linux.stat.exists
+      when:
+        - lynis100_grub_linux.stat.exists
+        - lynis100_grub_mode == 'grub.d'
       notify: Mettre à jour GRUB
 
     - name: GRUB | Régénération immédiate de grub.cfg
@@ -91,7 +147,7 @@
 
     - name: GRUB | Droits de grub.cfg
       ansible.builtin.file:
-        path: /boot/grub/grub.cfg
+        path: "{{ lynis100_grub_cfg }}"
         mode: "0600"
       failed_when: false
 

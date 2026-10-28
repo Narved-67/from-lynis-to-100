@@ -1,0 +1,36 @@
+---
+# Famille RedHat : RHEL, Rocky, AlmaLinux, CentOS Stream, Fedora
+# fail2ban, rkhunter, lynis, clamav viennent d'EPEL (sauf Fedora)
+lynis100_family_packages:
+  - fail2ban
+  - fail2ban-systemd
+  - python3-systemd
+  - libpwquality
+  - psacct
+  - sysstat
+  - audit
+  - aide
+  - clamav
+  - clamav-update
+  - usbguard
+  - e2fsprogs
+  - policycoreutils-python-utils
+lynis100_base_tools: [iproute, util-linux, procps-ng, openssl, grub2-tools-minimal, openssh-server, bind-utils]
+lynis100_lynis_pkg: lynis
+lynis100_rkhunter_pkg: rkhunter
+lynis100_nftables_pkg: nftables
+lynis100_dnsmasq_pkg: dnsmasq
+lynis100_ssh_service: sshd
+lynis100_sshd_bin: /usr/sbin/sshd
+lynis100_acct_service: psacct
+lynis100_clamav_services: [clamav-freshclam]
+lynis100_aide_conf: /etc/aide.conf
+lynis100_aide_db: /var/lib/aide/aide.db.gz
+lynis100_aide_init_cmd: [aide, --init]
+lynis100_aide_new_db: /var/lib/aide/aide.db.new.gz
+lynis100_grub_mkpasswd: grub2-mkpasswd-pbkdf2
+lynis100_grub_mode: user.cfg
+lynis100_grub_cfg: /boot/grub2/grub.cfg
+lynis100_grub_update_cmd: []
+lynis100_auto_updates: dnf-automatic
+lynis100_nft_conf: /etc/sysconfig/nftables.conf

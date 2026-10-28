@@ -1,12 +1,9 @@
 ---
 # Valeurs internes du rôle (ne pas surcharger)
 lynis100_security_packages: >-
-  {{ ['libpam-tmpdir', 'needrestart', 'fail2ban', 'python3-systemd', 'libpam-passwdqc',
-      'debsums', 'apt-show-versions', 'unattended-upgrades', 'acct', 'sysstat',
-      'auditd', 'aide', 'aide-common', 'clamav', 'clamav-daemon', 'apt-listchanges',
-      'clamav-freshclam', 'usbguard', 'e2fsprogs']
-     + ([] if lynis100_use_ufw else ['nftables'])
-     + ([] if lynis100_remove_compilers | bool else ['rkhunter']) }}
+  {{ lynis100_family_packages
+     + ([] if lynis100_use_ufw or lynis100_use_firewalld else [lynis100_nftables_pkg])
+     + ([] if lynis100_remove_compilers | bool else [lynis100_rkhunter_pkg]) }}
 
 # Profil sysctl de Lynis (default.prf), clés Linux.
 # kernel.modules_disabled est volontairement absent (exception).

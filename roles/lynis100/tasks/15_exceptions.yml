@@ -12,12 +12,14 @@
     lock_timeout: 300
   register: lynis100_listbugs_install
   failed_when: false
+  when: ansible_facts.os_family == 'Debian'
 
 - name: Exceptions | apt-listbugs réellement installé ?
   ansible.builtin.command: dpkg-query -W -f=${Status} apt-listbugs
   register: lynis100_listbugs
   changed_when: false
   failed_when: false
+  when: ansible_facts.os_family == 'Debian'
 
 - name: Exceptions | / est-il chiffré ? (DEB-0510)
   ansible.builtin.command: lsblk -no TYPE -s {{ ansible_facts.mounts | selectattr('mount', 'equalto', '/') | map(attribute='device') | first }}
@@ -43,7 +45,7 @@
          + ([{'id': 'DEB-0510', 'why': 'Disque systeme non chiffre (chiffrer = reinstaller)'}]
             if (lynis100_root_crypt.rc | int) != 0 else [])
          + ([{'id': 'DEB-0810', 'why': 'apt-listbugs absent des depots de cette distribution'}]
-            if 'install ok installed' not in lynis100_listbugs.stdout else [])
+            if ansible_facts.os_family == 'Debian' and 'install ok installed' not in lynis100_listbugs.stdout | default('') else [])
          + ([{'id': 'FILE-6310', 'why': 'home et var sur la partition racine (repartitionner = reinstaller)'}]
             if (lynis100_exception_unpartitioned | bool)
                and (lynis100_separate.results | rejectattr('rc', 'equalto', 0) | list | length > 0) else []) }}
@@ -80,10 +82,13 @@
     argv: [dpkg-query, -W, "-f=${db:Status-Abbrev} ${Package}\n"]
   register: lynis100_dpkg_states
   changed_when: false
+  when: ansible_facts.os_family == 'Debian'
 
 - name: Exceptions | Purge des configurations résiduelles
   ansible.builtin.apt:
     name: "{{ lynis100_dpkg_states.stdout_lines | select('match', '^rc') | map('split') | map('last') | list }}"
     state: absent
     purge: true
-  when: lynis100_dpkg_states.stdout_lines | select('match', '^rc') | list | length > 0
+  when:
+    - ansible_facts.os_family == 'Debian'
+    - lynis100_dpkg_states.stdout_lines | select('match', '^rc') | list | length > 0

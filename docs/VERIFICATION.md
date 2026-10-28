@@ -86,3 +86,17 @@ VM VMware, Debian 13.7 netinst, une seule partition, exécution en local
 | ✅ **63 → 99**, 0 échec | 158 tâches, bascule SSH 22 → 2222 en local |
 | Seul test incomplet | FILE-6310 : /home et /var sur la racine (1 point chacun) → exception automatique ajoutée |
 | Corrections | Message « appliqué au redémarrage » erroné pour des dossiers non séparés ; avertissements `raw`/`environment` et `reset_connection`/`when` supprimés ; documentation : FILE-6310 vaut 1 point par dossier, pas 10 |
+
+## Passe 5 — Multi-distribution, questionnaire, affichage
+
+| Contrôle | Résultat |
+|---|---|
+| `ansible-lint` production, `--syntax-check` | ✅ |
+| Questionnaire piloté (pexpect) : y partout sauf USB, DNS 192.168.42.2 / 1.1.1.1 | ✅ `lynis100_answers.yml` correct, mot de passe GRUB absent du fichier |
+| `-e lynis100_assume_yes=true` | ✅ aucune question, aucune valeur imposée |
+| Callback `lynis100_tui` rendu dans un pseudo-terminal (émulateur pyte) | ✅ panneau fixe, journal défilant, bilan final |
+| Chemins RHEL / Fedora / Arch | ⚠️ implémentés, **non exécutés** (pas d'image de test disponible) |
+
+Corrections : `fail_msg` évalué même quand l'assertion passe (clé absente en
+mode `assume_yes`) → `default('')` ; barre arrondie à 100 % pour 99 → arrondi
+inférieur ; ligne du journal en double après un échec ignoré → ordre corrigé.

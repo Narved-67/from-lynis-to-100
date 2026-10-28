@@ -1,13 +1,16 @@
 # From Lynis to 100%
 
-Rôle et playbook **Ansible** qui durcissent un serveur **Debian ou Ubuntu**
-pour faire passer son score Lynis (*Hardening index*) d'environ 60 à **100**.
+Rôle et playbook **Ansible** qui durcissent un serveur **Linux** (Debian, Ubuntu,
+RHEL / Rocky / Alma / Fedora, Arch) pour faire passer son score Lynis
+(*Hardening index*) d'environ 60 à **100**.
 
 ```
 Score Lynis : 62 -> 100
 ```
 
-Le playbook vérifie les prérequis, installe tous les outils dont il a besoin,
+Le playbook commence par **un questionnaire** sur les changements critiques
+(port SSH, pare-feu, USB...) et vos deux serveurs DNS, puis vérifie les
+prérequis, installe tous les outils dont il a besoin,
 sauvegarde la configuration, lance un audit initial, applique le durcissement,
 déclare les exceptions justifiées, bascule le port SSH sans risque de coupure,
 puis relance l'audit et affiche le score avec les tests encore incomplets.
@@ -19,8 +22,9 @@ puis relance l'audit et affiche le score avec les tests encore incomplets.
 Ce rôle applique un durcissement **agressif**, pensé pour un **serveur de lab,
 de formation ou une VM**, pas pour être appliqué à l'aveugle en production.
 Atteindre 100 sur Lynis impose des choix qui **modifient le comportement du
-système**. Le play refuse de démarrer tant que vous n'avez pas confirmé avec
-`-e lynis100_i_have_a_snapshot=true`.
+système**. Le questionnaire du début présente chaque changement critique :
+`y` l'applique, toute autre réponse l'ignore (Lynis n'atteindra alors pas 100).
+Sans snapshot confirmé, rien n'est lancé.
 
 | Domaine | Ce qui change | Impact à connaître |
 |---|---|---|
@@ -61,6 +65,8 @@ exécutez sur vos machines.
 | Debian 13 (trixie) | Rôle **exécuté** sur VM VMware vierge (Debian 13.7, Lynis 3.1.4) : **63 → 99** au premier passage (seul FILE-6310 restait, désormais en exception) |
 | Ubuntu 24.04 LTS | Rôle **exécuté** en conteneur systemd : 62 → 94 (le reste n'est pas applicable en conteneur), idempotent, bascule SSH validée |
 | Debian 12, Ubuntu 22.04 | Supportés, non testés de bout en bout |
+| RHEL / Rocky / Alma 9, Fedora | Implémentés (dnf, EPEL/CRB, firewalld, SELinux `ssh_port_t`, GRUB `user.cfg`, dnf-automatic), **non testés** |
+| Arch Linux | Implémenté (pacman, nftables, `grub-mkconfig`), **non testé** |
 | Conteneurs | Refusés (sauf `lynis100_allow_container=true`, réservé aux tests) |
 
 ## Prérequis
@@ -74,7 +80,7 @@ exécutez sur vos machines.
 
 **Sur la cible**
 
-- Debian 12/13 ou Ubuntu 22.04/24.04 avec systemd, accès Internet aux dépôts apt
+- Debian 12/13, Ubuntu 22.04/24.04, RHEL-like 9 / Fedora ou Arch, avec systemd et accès Internet aux dépôts
 - Un compte non-root accessible en SSH, avec `sudo` **ou** le mot de passe root (`su`)
 - 2 Go libres sur `/`
 - Pour 100 : installer Debian avec le partitionnement **« Partitions /home, /var et /tmp séparées »** (LVM conseillé). Sinon, FILE-6310 (1 point par dossier non séparé) est ajouté en exception justifiée
@@ -93,14 +99,29 @@ ansible-galaxy collection install -r requirements.yml
 cp inventory.ini.example inventory.ini                         # IP, utilisateur
 cp group_vars/lynis_targets.yml.example group_vars/lynis_targets.yml
 
-# Mot de passe GRUB chiffré
-mkdir -p group_vars/lynis_targets
-ansible-vault create group_vars/lynis_targets/vault.yml
-#   lynis100_grub_password: "MotDePasseGrubFort"
-
-ansible-playbook site.yml -e lynis100_i_have_a_snapshot=true \
-  --ask-become-pass --ask-vault-pass
+ansible-playbook site.yml --ask-become-pass
 ```
+
+Le questionnaire demande : snapshot (obligatoire), port SSH 22 → 2222,
+restriction SSH (root refusé), pare-feu, USB, montages `noexec`, déconnexion
+après 15 min, expiration des mots de passe, retrait des compilateurs, mot de
+passe GRUB (saisi masqué, **jamais enregistré**), DNS primaire et secondaire.
+Les réponses sont mémorisées dans `lynis100_answers.yml` (ignoré par git) et
+proposées à l'exécution suivante.
+
+| Option | Effet |
+|---|---|
+| `-e lynis100_reask=true` | Repose toutes les questions |
+| `-e lynis100_assume_yes=true` | Aucune question : valeurs de `group_vars` / `defaults` (GRUB : `lynis100_grub_password` en vault) |
+
+### Affichage
+
+Le callback `lynis100_tui` (activé dans `ansible.cfg`) affiche un panneau fixe en
+bas du terminal : barre de progression, étape en cours, tâche Ansible ou
+commande sh en cours (avec sa confirmation), barre du score Lynis, compteurs.
+À la fin : bilan par étape, score avant / après, et la liste de **ce qui n'a pas
+réussi** (échecs, tests Lynis incomplets, avertissements). Hors terminal, sortie
+texte simple. Sortie Ansible classique : `ANSIBLE_STDOUT_CALLBACK=default`.
 
 `--ask-become-pass` demande le mot de passe `sudo`, ou le mot de passe root si
 `ansible_become_method=su` (Debian installé avec un mot de passe root).

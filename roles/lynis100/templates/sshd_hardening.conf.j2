@@ -9,4 +9,6 @@ ClientAliveCountMax {{ lynis100_ssh_client_alive_count_max }}
 LogLevel VERBOSE
 MaxAuthTries {{ lynis100_ssh_max_auth_tries }}
 MaxSessions {{ lynis100_ssh_max_sessions }}
+{% if lynis100_ssh_restrict_users | bool %}
 AllowUsers {{ lynis100_allow_users_final | join(' ') }}
+{% endif %}

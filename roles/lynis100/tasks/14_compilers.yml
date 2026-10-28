@@ -6,7 +6,7 @@
 # =============================================================================
 - name: Compilateurs | Paquets installés
   ansible.builtin.package_facts:
-    manager: apt
+    manager: auto
 
 - name: Compilateurs | Liste
   ansible.builtin.set_fact:
@@ -16,6 +16,7 @@
   when:
     - lynis100_remove_compilers | bool
     - lynis100_compilers_present | length > 0
+    - ansible_facts.os_family == 'Debian'  # simulation apt uniquement : ailleurs, accès réservé à root
   block:
     - name: Compilateurs | Simulation apt
       ansible.builtin.command: apt-get -s purge {{ lynis100_compilers_present | join(' ') }}  # noqa: command-instead-of-module

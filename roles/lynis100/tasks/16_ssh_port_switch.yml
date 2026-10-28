@@ -25,6 +25,24 @@
 - name: Port SSH | Bascule
   when: lynis100_port_change | bool
   block:
+    - name: Port SSH | SELinux autorise sshd sur le nouveau port
+      community.general.seport:
+        ports: "{{ lynis100_ssh_port | int }}"
+        proto: tcp
+        setype: ssh_port_t
+        state: present
+      when: lynis100_selinux
+
+    - name: Port SSH | firewalld ouvre le nouveau port
+      ansible.posix.firewalld:
+        port: "{{ lynis100_ssh_port | int }}/tcp"
+        permanent: true
+        immediate: true
+        state: enabled
+      when:
+        - lynis100_firewall | bool
+        - lynis100_use_firewalld
+
     - name: Port SSH | Étape 1 - écoute sur l'ancien et le nouveau port
       ansible.builtin.copy:
         dest: /etc/ssh/sshd_config.d/98-lynis-to-100-port.conf
@@ -38,7 +56,7 @@
         mode: "0600"
 
     - name: Port SSH | Contrôle de la configuration complète
-      ansible.builtin.command: /usr/sbin/sshd -t
+      ansible.builtin.command: "{{ lynis100_sshd_bin }} -t"
       changed_when: false
 
     - name: Port SSH | Dossier ssh.socket.d
@@ -65,7 +83,7 @@
 
     - name: Port SSH | Redémarrage (sessions existantes conservées)
       ansible.builtin.systemd:
-        name: "{{ 'ssh.socket' if lynis100_ssh_socket.stdout | trim == 'enabled' else 'ssh' }}"
+        name: "{{ 'ssh.socket' if lynis100_ssh_socket.stdout | trim == 'enabled' else lynis100_ssh_service }}"
         state: restarted
         daemon_reload: true
 
@@ -102,7 +120,7 @@
         mode: "0600"
 
     - name: Port SSH | Contrôle de la configuration finale
-      ansible.builtin.command: /usr/sbin/sshd -t
+      ansible.builtin.command: "{{ lynis100_sshd_bin }} -t"
       changed_when: false
 
     - name: "Port SSH | ssh.socket (Ubuntu) : nouveau port seul"
@@ -120,7 +138,7 @@
 
     - name: Port SSH | Redémarrage final
       ansible.builtin.systemd:
-        name: "{{ 'ssh.socket' if lynis100_ssh_socket.stdout | trim == 'enabled' else 'ssh' }}"
+        name: "{{ 'ssh.socket' if lynis100_ssh_socket.stdout | trim == 'enabled' else lynis100_ssh_service }}"
         state: restarted
         daemon_reload: true
 
@@ -128,7 +146,7 @@
       when:
         - lynis100_firewall | bool
         - not lynis100_in_container
-        - not lynis100_docker.stat.exists
+        - not lynis100_has_docker
       block:
         - name: Port SSH | Ports TCP finaux
           ansible.builtin.set_fact:
@@ -139,24 +157,48 @@
         - name: Port SSH | nftables
           ansible.builtin.template:
             src: nftables.conf.j2
-            dest: /etc/nftables.conf
+            dest: "{{ lynis100_nft_conf }}"
             owner: root
             group: root
             mode: "0700"
             validate: nft -c -f %s
           register: lynis100_nft_final
-          when: not lynis100_use_ufw
+          when:
+            - not lynis100_use_ufw
+            - not lynis100_use_firewalld
 
-        - name: Port SSH | Application immédiate des règles nftables  # noqa: no-handler
-          ansible.builtin.command: nft -f /etc/nftables.conf
+        - name: "Port SSH | Application immédiate des règles nftables"  # noqa: no-handler
+          ansible.builtin.command: nft -f {{ lynis100_nft_conf }}
           when: lynis100_nft_final is changed
           changed_when: true
 
-        - name: Port SSH | fail2ban recrée sa table nftables  # noqa: no-handler
+        - name: "Port SSH | fail2ban recrée sa table nftables"  # noqa: no-handler
           ansible.builtin.systemd:
             name: fail2ban
             state: restarted
           when: lynis100_nft_final is changed
+
+        - name: "Port SSH | firewalld : retrait du service ssh (port 22)"
+          ansible.posix.firewalld:
+            service: ssh
+            permanent: true
+            immediate: true
+            state: disabled
+          when:
+            - lynis100_use_firewalld
+            - (lynis100_conn_port | int) != (lynis100_ssh_port | int)
+          failed_when: false
+
+        - name: "Port SSH | firewalld : fermeture de l'ancien port"
+          ansible.posix.firewalld:
+            port: "{{ lynis100_conn_port }}/tcp"
+            permanent: true
+            immediate: true
+            state: disabled
+          when:
+            - lynis100_use_firewalld
+            - (lynis100_conn_port | int) != (lynis100_ssh_port | int)
+          failed_when: false
 
         - name: "Port SSH | ufw : fermeture de l'ancien port"
           community.general.ufw:
@@ -193,7 +235,7 @@
 
     - name: Port SSH | Redémarrage sur l'ancien port
       ansible.builtin.systemd:
-        name: "{{ 'ssh.socket' if lynis100_ssh_socket.stdout | trim == 'enabled' else 'ssh' }}"
+        name: "{{ 'ssh.socket' if lynis100_ssh_socket.stdout | trim == 'enabled' else lynis100_ssh_service }}"
         state: restarted
         daemon_reload: true
 

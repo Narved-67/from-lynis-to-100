@@ -5,7 +5,9 @@
 # Ignoré en conteneur.
 # =============================================================================
 - name: Montages | Bloc principal
-  when: not lynis100_in_container
+  when:
+    - not lynis100_in_container
+    - lynis100_harden_mounts | bool
   block:
     - name: Montages | /proc avec hidepid=2 (FILE-6344)
       ansible.posix.mount:
@@ -147,6 +149,7 @@
         owner: root
         group: root
         mode: "0644"
+      when: ansible_facts.os_family == 'Debian'
 
     - name: Montages | Vérification de fstab
       ansible.builtin.command: findmnt --verify

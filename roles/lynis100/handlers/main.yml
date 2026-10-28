@@ -1,11 +1,11 @@
 ---
 - name: Recharger sshd
   ansible.builtin.systemd:
-    name: ssh
+    name: "{{ lynis100_ssh_service }}"
     state: reloaded
 
 - name: Recharger nftables
-  ansible.builtin.command: nft -f /etc/nftables.conf
+  ansible.builtin.command: nft -f {{ lynis100_nft_conf }}
   changed_when: true
   notify: Redémarrer fail2ban
 
@@ -30,8 +30,10 @@
     state: reloaded
 
 - name: Mettre à jour GRUB
-  ansible.builtin.command: update-grub
+  ansible.builtin.command:
+    argv: "{{ lynis100_grub_update_cmd }}"
   changed_when: true
+  when: lynis100_grub_update_cmd | length > 0
 
 - name: Recharger postfix
   ansible.builtin.systemd:
@@ -42,3 +44,8 @@
   ansible.builtin.systemd:
     name: dnsmasq
     state: restarted
+
+- name: Recharger NetworkManager
+  ansible.builtin.systemd:
+    name: NetworkManager
+    state: reloaded

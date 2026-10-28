@@ -1,0 +1,31 @@
+---
+# Famille Arch Linux
+lynis100_family_packages:
+  - fail2ban
+  - python-systemd
+  - libpwquality
+  - acct
+  - sysstat
+  - audit
+  - clamav
+  - usbguard
+  - e2fsprogs
+lynis100_base_tools: [iproute2, util-linux, procps-ng, openssl, openssh, bind]
+lynis100_lynis_pkg: lynis
+lynis100_rkhunter_pkg: rkhunter
+lynis100_nftables_pkg: nftables
+lynis100_dnsmasq_pkg: dnsmasq
+lynis100_ssh_service: sshd
+lynis100_sshd_bin: /usr/bin/sshd
+lynis100_acct_service: psacct
+lynis100_clamav_services: [clamav-freshclam]
+lynis100_aide_conf: /etc/aide.conf
+lynis100_aide_db: /var/lib/aide/aide.db.gz
+lynis100_aide_init_cmd: [aide, --init]
+lynis100_aide_new_db: /var/lib/aide/aide.db.new.gz
+lynis100_grub_mkpasswd: grub-mkpasswd-pbkdf2
+lynis100_grub_mode: grub.d
+lynis100_grub_cfg: /boot/grub/grub.cfg
+lynis100_grub_update_cmd: [grub-mkconfig, -o, /boot/grub/grub.cfg]
+lynis100_auto_updates: none
+lynis100_nft_conf: /etc/nftables.conf
